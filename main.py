@@ -523,7 +523,7 @@ class CourseReminderPlugin(Star):
                     "subtitle": subtitle,
                     "date_str": target.strftime("%m-%d"),
                     "courses": courses,
-                    "page_width": 520,
+                    "page_width": 420,
                 },
                 options={"quality": 100, "full_page": True},
             )
@@ -568,7 +568,7 @@ class CourseReminderPlugin(Star):
                     "title": title,
                     "subtitle": subtitle,
                     "days": days,
-                    "page_width": 860,
+                    "page_width": 420,
                 },
                 options={"quality": 100, "full_page": True},
             )
@@ -723,7 +723,7 @@ class CourseReminderPlugin(Star):
                         "subtitle": subtitle,
                         "date_str": today.strftime("%m-%d"),
                         "courses": courses,
-                        "page_width": 520,
+                        "page_width": 420,
                     },
                     options={"quality": 100, "full_page": True},
                 )
