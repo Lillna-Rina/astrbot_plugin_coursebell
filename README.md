@@ -107,28 +107,9 @@ astrbot_plugin_coursebell/
 
 MIT License - 详见 [LICENSE](https://github.com/Lillna-Rina/astrbot_plugin_coursebell/blob/main/LICENSE)。
 
-## 相关链接
-
-- [项目地址](https://github.com/Lillna-Rina/astrbot_plugin_coursebell)
-- [更新日志](https://github.com/Lillna-Rina/astrbot_plugin_coursebell/blob/main/CHANGELOG.md)
-- [问题反馈](https://github.com/Lillna-Rina/astrbot_plugin_coursebell/issues)
-- [AstrBot](https://docs.astrbot.app/)
-- [WakeUp 课程表](https://www.wakeupcourse.com/)（导出 .ics 课表）
-- [参考项目：astrbot_plugin_course](https://github.com/PolysaCHride/astrbot_plugin_course)
-
 ## 常见问题
 
 - **课表输出为文本而不是图片**：AstrBot 未安装 Playwright 渲染环境，功能不受影响；安装 Playwright 后即可获得竖屏图片。
 - **文件夹中没有文件**：确认 `.ics` 文件已放入配置的文件夹（可在 WebUI 插件配置中查看路径），并发送 `/绑定课表`。
 - **示例课表失败**：查看 `/课表文件` 是否提示目录回退；插件会自动回退到数据目录并继续生成。
 - **时区**：插件固定按东八区（Asia/Shanghai）计算日期与提醒时间。
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=Lillna-Rina%2Fastrbot_plugin_coursebell&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Lillna-Rina/astrbot_plugin_coursebell&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Lillna-Rina/astrbot_plugin_coursebell&type=date&theme=light&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Lillna-Rina/astrbot_plugin_coursebell&type=date&legend=top-left" />
- </picture>
-</a>
