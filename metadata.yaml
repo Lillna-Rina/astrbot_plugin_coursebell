@@ -4,3 +4,17 @@ desc: 直接读取本地文件夹中的课表文件，可查看今日、明日�
 version: 1.4.0
 author: RinaLin
 astrbot_version: ">=4.19.4"
+name: astrbot_plugin_coursebell
+display_name: 课铃
+# short_desc: 本地导入课表后查看课表及课前提醒。
+desc: 直接读取本地文件夹中的课表文件，可查看今日、明日、本周及下周的课表（竖屏图片），支持课前提醒与每日定时推送课表。
+  可以写多行文本，支持 Markdown 格式。
+version: 1.4.0
+author: RinaLin
+repo: https://github.com/Lillna-Rina/astrbot_plugin_coursebell
+# astrbot_version: ">=4.19.4"
+# support_platforms:
+#   - aiocqhttp
+# tags:
+  # - 生活
+  # - 工具
