@@ -1,6 +1,6 @@
 name: astrbot_plugin_coursebell
 display_name: 课铃
-desc: 课铃：直接读取本地文件夹中的课表文件，可查看今日、明日、本周及下周的课表（竖屏图片），支持课前提醒与每日定时推送课表。
+desc: 直接读取本地文件夹中的课表文件，可查看今日、明日、本周及下周的课表（竖屏图片），支持课前提醒与每日定时推送课表。
 version: 1.4.0
 author: Lillna-Rina
 astrbot_version: ">=4.19.4"
