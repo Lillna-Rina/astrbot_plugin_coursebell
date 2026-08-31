@@ -101,13 +101,36 @@ DAY_TMPL = r"""<!doctype html>
     (function () {
       var stage = document.getElementById('stage');
       var content = document.getElementById('content');
-      var maxH = stage.clientHeight;
+      var doc = document.documentElement;
+      var body = document.body;
+      var minW = {{ page_width | default(420) }};
+      var stepW = 60;
+      var maxW = minW + stepW * 3;
+      var W = minW;
+      var H_target = W * 4 / 3;
+      stage.style.width = W + 'px';
+      stage.style.height = H_target + 'px';
+      body.style.width = W + 'px';
+      doc.style.width = W + 'px';
+
       var h = content.scrollHeight;
-      if (h > maxH) {
-        var s = maxH / h;
+      if (h > H_target) {
+        var needW = Math.ceil(h * 3 / 4);
+        W = Math.min(Math.max(needW, minW + stepW), maxW);
+        W = Math.ceil(W / stepW) * stepW;
+        H_target = W * 4 / 3;
+        stage.style.width = W + 'px';
+        stage.style.height = H_target + 'px';
+        body.style.width = W + 'px';
+        doc.style.width = W + 'px';
+        h = content.scrollHeight;
+      }
+
+      if (h > H_target) {
+        var s = H_target / h;
         content.style.transform = 'scale(' + s + ')';
         content.style.transformOrigin = 'top left';
-        content.style.marginLeft = ((stage.clientWidth - stage.clientWidth * s) / 2) + 'px';
+        content.style.marginLeft = ((W - W * s) / 2) + 'px';
       }
     })();
   </script>
@@ -217,13 +240,36 @@ WEEK_TMPL = r"""<!doctype html>
     (function () {
       var stage = document.getElementById('stage');
       var content = document.getElementById('content');
-      var maxH = stage.clientHeight;
+      var doc = document.documentElement;
+      var body = document.body;
+      var minW = {{ page_width | default(420) }};
+      var stepW = 60;
+      var maxW = minW + stepW * 3;
+      var W = minW;
+      var H_target = W * 4 / 3;
+      stage.style.width = W + 'px';
+      stage.style.height = H_target + 'px';
+      body.style.width = W + 'px';
+      doc.style.width = W + 'px';
+
       var h = content.scrollHeight;
-      if (h > maxH) {
-        var s = maxH / h;
+      if (h > H_target) {
+        var needW = Math.ceil(h * 3 / 4);
+        W = Math.min(Math.max(needW, minW + stepW), maxW);
+        W = Math.ceil(W / stepW) * stepW;
+        H_target = W * 4 / 3;
+        stage.style.width = W + 'px';
+        stage.style.height = H_target + 'px';
+        body.style.width = W + 'px';
+        doc.style.width = W + 'px';
+        h = content.scrollHeight;
+      }
+
+      if (h > H_target) {
+        var s = H_target / h;
         content.style.transform = 'scale(' + s + ')';
         content.style.transformOrigin = 'top left';
-        content.style.marginLeft = ((stage.clientWidth - stage.clientWidth * s) / 2) + 'px';
+        content.style.marginLeft = ((W - W * s) / 2) + 'px';
       }
     })();
   </script>

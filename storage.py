@@ -112,6 +112,26 @@ class CourseStorage:
         """示例课表文件的路径（以用户 ID 命名，便于自动匹配）。"""
         return self.ics_dir / f"sample_{_safe_name(user_id)}.ics"
 
+    def get_upload_ics_path(
+        self, user_id: str, name_hint: Optional[str] = None
+    ) -> Path:
+        """用户上传 .ics 文件时的保存路径。
+
+        - 若能从消息中获取原始文件名（且以 .ics 结尾），优先使用原名；
+        - 文件名冲突时自动加时间戳后缀；
+        - 无法取得原名时使用 `uploaded_<user_id>_<timestamp>.ics`。
+        """
+        ts = int(time.time())
+        if name_hint and name_hint.lower().endswith(".ics"):
+            stem = name_hint[:-4]
+            suffix = name_hint[-4:]
+            safe_stem = _safe_name(stem)
+            candidate = self.ics_dir / f"{safe_stem}{suffix}"
+            if not candidate.exists():
+                return candidate
+            return self.ics_dir / f"{safe_stem}_{ts}{suffix}"
+        return self.ics_dir / f"uploaded_{_safe_name(user_id)}_{ts}.ics"
+
     def find_auto_file(self, user_id: str) -> Optional[str]:
         """查找可以自动匹配到该用户的课表文件。
 

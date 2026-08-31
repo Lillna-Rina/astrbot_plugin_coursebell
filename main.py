@@ -29,6 +29,7 @@ from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Image
 from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.core.platform.message_session import MessageSession
+from astrbot.core.utils.io import download_file
 from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
 from .course_types import CourseEvent, UserBinding
@@ -163,24 +164,25 @@ class CourseBellPlugin(Star):
     # ------------------------------------------------------------------
     @filter.command("绑定课表", alias={"绑定", "bind"})
     async def bind_course(self, event: AstrMessageEvent, filename: str = ""):
-        """绑定本地文件夹中的课表文件。
+        """绑定课表文件（支持本地选择与上传）。
 
-        - /绑定课表：列出文件夹中的 .ics 文件，回复文件名完成绑定
+        - /绑定课表：列出文件夹中的 .ics 文件，回复文件名或发送新文件完成绑定
         - /绑定课表 文件名.ics：直接绑定指定文件
+        - 任何时候发送 .ics 文件都会自动下载到文件夹并绑定
         """
         user_id = str(event.get_sender_id())
         nickname = str(event.get_sender_name())
         ics_dir = self._storage.ics_dir
 
+        # 1) 命令触发时如果直接带了 .ics 文件，直接下载绑定
+        direct_url, direct_name = await _try_get_file_info(event)
+        if direct_url:
+            saved = await self._handle_upload(user_id, nickname, event, direct_url, direct_name)
+            if saved:
+                return
+            # 下载失败时继续走下方列表/上传流程
+
         files = self._storage.list_ics_files()
-        if not files:
-            yield event.plain_result(
-                "课表文件夹中没有任何 .ics 文件。\n"
-                f"请将课表 .ics 文件放入文件夹：\n{ics_dir}\n"
-                "然后重新发送 /绑定课表（或 /绑定课表 文件名.ics）。\n"
-                "也可发送 /示例课表 生成示例课表体验功能。"
-            )
-            return
 
         if filename:
             target = pick_ics_file(files, filename)
@@ -199,11 +201,33 @@ class CourseBellPlugin(Star):
             yield event.plain_result(f"绑定成功：{target}")
             return
 
-        yield event.plain_result(
-            "请回复要绑定的课表文件名（120 秒内有效，回复「退出」可取消）：\n"
-            + "\n".join(f"📄 {f}" for f in files)
-        )
+        if not files:
+            yield event.plain_result(
+                "课表文件夹中没有 .ics 文件。\n"
+                f"课表文件夹：{ics_dir}\n"
+                "📥 你可以直接发送 .ics 文件作为消息（我会自动下载到该文件夹并绑定），\n"
+                "或者发送「示例课表」生成示例课表体验。"
+            )
+            async for r in self._bind_wait_upload(event, user_id, nickname, files):
+                yield r
+            return
 
+        yield event.plain_result(
+            "请回复要绑定的课表文件名（120 秒内有效，回复「退出」可取消）。\n"
+            "📥 也可直接发送 .ics 文件作为消息，下载到文件夹后自动绑定。\n"
+            "📄 " + "\n📄 ".join(files)
+        )
+        async for r in self._bind_wait_upload(event, user_id, nickname, files):
+            yield r
+
+    async def _bind_wait_upload(
+        self,
+        event: AstrMessageEvent,
+        user_id: str,
+        nickname: str,
+        files: list,
+    ):
+        """绑定流程的会话等待：支持回复文件名或发送 .ics 文件。"""
         @session_waiter(timeout=_BIND_TIMEOUT, record_history_chains=False)
         async def waiter(controller: SessionController, evt: AstrMessageEvent):
             text = (evt.message_str or "").strip()
@@ -212,11 +236,32 @@ class CourseBellPlugin(Star):
                 controller.stop()
                 return
 
+            # 检测到 .ics 文件：自动下载并绑定
+            file_url, file_name = await _try_get_file_info(evt)
+            if file_url:
+                saved = await self._handle_upload(
+                    user_id, nickname, evt, file_url, file_name
+                )
+                if saved:
+                    controller.stop()
+                else:
+                    controller.keep(timeout=_BIND_TIMEOUT, reset_timeout=True)
+                return
+
+            # 也允许直接粘贴 .ics 链接
+            if re.match(r"^https?://\S+\.ics(\?.*)?$", text, re.I):
+                saved = await self._handle_upload(user_id, nickname, evt, text, None)
+                if saved:
+                    controller.stop()
+                else:
+                    controller.keep(timeout=_BIND_TIMEOUT, reset_timeout=True)
+                return
+
             target = pick_ics_file(files, text)
             if not target:
                 await evt.send(
                     evt.plain_result(
-                        f"未找到「{text}」，请重新回复文件名（回复「退出」取消）。"
+                        f"未找到「{text}」，请重新回复文件名（回复「退出」取消），或直接发送 .ics 文件。"
                     )
                 )
                 controller.keep(timeout=_BIND_TIMEOUT, reset_timeout=True)
@@ -243,6 +288,40 @@ class CourseBellPlugin(Star):
             yield event.plain_result("绑定超时，请重新发送 /绑定课表。")
         finally:
             event.stop_event()
+
+    async def _handle_upload(
+        self,
+        user_id: str,
+        nickname: str,
+        evt: AstrMessageEvent,
+        file_url: str,
+        file_name: Optional[str],
+    ) -> bool:
+        """下载 .ics 文件到 ics_dir 并绑定用户。成功返回 True。"""
+        ics_path = self._storage.get_upload_ics_path(user_id, file_name)
+        await evt.send(evt.plain_result("正在下载课表..."))
+        try:
+            await download_file(file_url, str(ics_path))
+        except Exception as e:
+            logger.error(f"[coursebell] upload download failed: {e}")
+            await evt.send(evt.plain_result("文件下载失败，请重试。"))
+            return False
+
+        self._parser.clear_cache(str(ics_path))
+        self._storage.upsert_binding(
+            user_id=user_id,
+            unified_msg_origin=evt.unified_msg_origin,
+            nickname=nickname,
+            ics_file=ics_path.name,
+        )
+        await evt.send(
+            evt.plain_result(
+                f"✅ 已下载到课表文件夹并绑定：\n📄 {ics_path.name}\n"
+                f"📁 {ics_path.parent}\n"
+                "可发送 /今日课表 查看，或 /课表文件 查看文件夹。"
+            )
+        )
+        return True
 
     @filter.command("课表文件", alias={"文件列表", "files"})
     async def list_files(self, event: AstrMessageEvent):
@@ -890,6 +969,43 @@ def _reminder_time_from_key(key: str):
     if dt.tzinfo is None:
         return dt.replace(tzinfo=SHANGHAI_TZ)
     return dt.astimezone(SHANGHAI_TZ)
+
+
+async def _try_get_file_info(event: AstrMessageEvent):
+    """从消息中提取 .ics 文件的下载 URL 与原始文件名。
+
+    Returns:
+        (url, name) 元组；未检测到文件时返回 (None, None)。
+        兼容不同平台 File 组件实现（aiocqhttp 的 url / get_file 等）。
+    """
+    try:
+        for m in event.get_messages():
+            if getattr(m, "type", None) != "File":
+                continue
+            # 仅接受 .ics 文件
+            name = (getattr(m, "name", None) or "").strip()
+            if name and not name.lower().endswith(".ics"):
+                continue
+
+            # 部分平台直接暴露 url 字段
+            url = getattr(m, "url", None)
+            if isinstance(url, str) and url.startswith("http"):
+                return url, name or None
+
+            # 部分平台通过 get_file 协程获取下载 URL
+            get_file = getattr(m, "get_file", None)
+            if callable(get_file):
+                try:
+                    res = get_file(allow_return_url=True)
+                    if asyncio.iscoroutine(res):
+                        res = await res
+                    if isinstance(res, str) and res.startswith("http"):
+                        return res, name or None
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return None, None
 
 
 def _is_valid_time(time_str: str) -> bool:

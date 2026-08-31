@@ -1,9 +1,28 @@
 name: astrbot_plugin_coursebell
 display_name: 课铃
-short_desc: 本地课表 + 课前提醒 + 每日定时推送
-desc: 
-  课铃（CourseBell）是一个 AstrBot 课程提醒插件，直接读取本地文件夹中的 .ics 课表文件。
-version: 1.4.0
+short_desc: 本地课表 + 课前提醒 + 每日定时推送，3:4 课表卡片
+desc: |
+  课铃（CourseBell）是一个 AstrBot 课程提醒插件，**直接读取本地文件夹中的 .ics 课表文件**（也支持在绑定流程中上传 .ics 文件），不依赖外部导入。
+
+  ## 功能
+
+  - 📅 今日 / 明日 / 本周 / 下周课表查询，**3:4 比例自适应竖屏图片**输出（无 Playwright 时自动降级为文本）
+  - ⏰ 课前提醒：开课前 N 分钟自动提醒（可配置 1-120 分钟，同一节课只提醒一次）
+  - 📤 每日定时推送：每天指定时间（如 07:00）自动推送当日课表，重启后自动恢复
+  - 🔗 文件名以用户 ID 开头（如 123456.ics）自动匹配绑定，无需手动绑定
+  - 📥 绑定流程中直接发送 .ics 文件即可下载到课表文件夹并完成绑定
+  - 🧪 一键生成示例课表（含 20 分钟后开始的测试课），快速体验全部功能
+  - 🔄 文件变更自动检测，替换 .ics 文件即刻生效；重复课程（RRULE）、EXDATE、东八区时间换算全支持
+
+  ## 使用方法
+
+  1. 将课表 .ics 文件放入课表文件夹（插件配置 `ics_dir`，留空则使用插件数据目录下的 `ics` 文件夹），或在使用 `/绑定课表` 时直接发送 .ics 文件作为消息
+  2. 发送 `/绑定课表` 选择文件完成绑定（或依赖自动匹配）
+  3. 发送 `/今日课表`、`/本周课表` 等指令查询课表
+  4. 使用 `/设置提醒时间`、`/设置每日推送` 配置课前提醒与每日推送
+
+  更多指令（`/课表文件`、`/删除课表`、`/查看设置` 等）见 `/课表帮助`。
+version: 1.5.0
 author: RinaLin
 repo: https://github.com/Lillna-Rina/astrbot_plugin_coursebell
 support_platforms:
@@ -13,3 +32,10 @@ social_link: https://github.com/Lillna-Rina
 tags:
   - 生活
   - 工具
+  - 课表
+  - 课程提醒
+  - 上课提醒
+  - 定时推送
+  - timetable
+  - course-schedule
+  - icalendar
