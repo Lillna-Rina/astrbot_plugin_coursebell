@@ -6,8 +6,8 @@ desc:
 version: 1.4.0
 author: RinaLin
 repo: https://github.com/Lillna-Rina/astrbot_plugin_coursebell
-  # support_platforms:
-  #   - aiocqhttp
+support_platforms:
+  - aiocqhttp
 astrbot_version: ">=4.19.4"
 social_link: https://github.com/Lillna-Rina
 tags:
