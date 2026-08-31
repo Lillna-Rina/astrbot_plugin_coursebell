@@ -2,7 +2,7 @@ name: astrbot_plugin_coursebell
 display_name: 课铃
 short_desc: 本地课表 + 课前提醒 + 每日定时推送
 desc: 
-  课铃（CourseBell）是一个 AstrBot 课程提醒插件，直接读取本地文件夹中的 .ics 课表文件，不依赖用户上传。
+  课铃（CourseBell）是一个 AstrBot 课程提醒插件，直接读取本地文件夹中的 .ics 课表文件。
 version: 1.4.0
 author: RinaLin
 repo: https://github.com/Lillna-Rina/astrbot_plugin_coursebell
