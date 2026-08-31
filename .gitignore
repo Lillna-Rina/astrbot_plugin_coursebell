@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+*.pyo
+.test_tmp/
+.integ_tmp/
+*.zip
+.pip_tmp/
