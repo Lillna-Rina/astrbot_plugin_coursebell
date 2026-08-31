@@ -527,6 +527,7 @@ class CourseBellPlugin(Star):
                     "date_str": target.strftime("%m-%d"),
                     "courses": courses,
                     "page_width": 420,
+                    "page_height": 560,
                 },
                 options={"quality": 100, "full_page": True},
             )
@@ -572,6 +573,7 @@ class CourseBellPlugin(Star):
                     "subtitle": subtitle,
                     "days": days,
                     "page_width": 420,
+                    "page_height": 560,
                 },
                 options={"quality": 100, "full_page": True},
             )
@@ -727,6 +729,7 @@ class CourseBellPlugin(Star):
                         "date_str": today.strftime("%m-%d"),
                         "courses": courses,
                         "page_width": 420,
+                        "page_height": 560,
                     },
                     options={"quality": 100, "full_page": True},
                 )
