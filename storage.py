@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -17,13 +18,35 @@ from typing import Dict, List, Optional
 from .course_types import UserBinding
 
 
+def _safe_name(raw: str) -> str:
+    """把用户 ID 等字符串转换为安全的文件名片段。"""
+    safe = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(raw))
+    safe = safe.strip().strip(".")
+    return safe or "user"
+
+
 class CourseStorage:
     def __init__(self, base_dir: Path, ics_dir: Path):
         self._base_dir = Path(base_dir)
-        self.ics_dir = Path(ics_dir)
         self._bindings_file = self._base_dir / "bindings.json"
         self._base_dir.mkdir(parents=True, exist_ok=True)
-        self.ics_dir.mkdir(parents=True, exist_ok=True)
+
+        # 默认课表文件夹（插件数据目录下），作为配置目录不可用时的兜底
+        self.fallback_dir = self._base_dir / "ics"
+        self.fallback_dir.mkdir(parents=True, exist_ok=True)
+
+        # 用户配置的课表文件夹；创建失败（无权限/跨平台路径等）时回退到默认目录
+        self._ics_dir_fallback_reason = ""
+        self.ics_dir = Path(ics_dir)
+        try:
+            self.ics_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            self._ics_dir_fallback_reason = str(e)
+            self.ics_dir = self.fallback_dir
+
+    @property
+    def ics_dir_fallback_reason(self) -> str:
+        return self._ics_dir_fallback_reason
 
     # ------------------------------------------------------------------
     # 本地课表文件
@@ -39,12 +62,19 @@ class CourseStorage:
         )
 
     def ics_abs_path(self, binding: UserBinding) -> Path:
-        """根据绑定记录解析课表文件的绝对路径。"""
+        """根据绑定记录解析课表文件的绝对路径。
+
+        ics_file 可以是文件名（相对 ics_dir），也可以是绝对路径
+        （示例课表回退写入数据目录时使用）。
+        """
+        p = Path(binding.ics_file)
+        if p.is_absolute():
+            return p
         return (self.ics_dir / binding.ics_file).resolve()
 
     def get_sample_ics_path(self, user_id: str) -> Path:
         """示例课表文件的路径（以用户 ID 命名，便于自动匹配）。"""
-        return self.ics_dir / f"sample_{user_id}.ics"
+        return self.ics_dir / f"sample_{_safe_name(user_id)}.ics"
 
     def find_auto_file(self, user_id: str) -> Optional[str]:
         """查找可以自动匹配到该用户的课表文件。
@@ -66,9 +96,17 @@ class CourseStorage:
     # ------------------------------------------------------------------
     @staticmethod
     def _normalize_ics_file(raw: str) -> str:
-        """兼容旧版本数据：旧的 ics_file 是相对路径（如 ics/123.ics），只取文件名。"""
-        name = str(raw or "").replace("\\", "/").split("/")[-1]
-        return name
+        """兼容旧版本数据：旧的 ics_file 是相对路径（如 ics/123.ics），只取文件名。
+
+        绝对路径（示例课表回退到数据目录时记录）保持原样。
+        """
+        name = str(raw or "")
+        if not name:
+            return ""
+        p = Path(name)
+        if p.is_absolute():
+            return name.replace("\\", "/")
+        return name.replace("\\", "/").split("/")[-1]
 
     def load_bindings(self) -> Dict[str, UserBinding]:
         if not self._bindings_file.exists():

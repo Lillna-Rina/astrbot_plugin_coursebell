@@ -83,6 +83,11 @@ class CourseReminderPlugin(Star):
     async def initialize(self):
         async with self._init_lock:
             logger.info(f"[course] initializing... ics_dir={self._storage.ics_dir}")
+            if self._storage.ics_dir_fallback_reason:
+                logger.warning(
+                    f"[course] configured ics_dir unavailable, using fallback dir: "
+                    f"{self._storage.ics_dir_fallback_reason}"
+                )
             if self._reminder_task is not None and not self._reminder_task.done():
                 self._stop_event.set()
                 self._reminder_task.cancel()
@@ -240,9 +245,15 @@ class CourseReminderPlugin(Star):
     async def list_files(self, event: AstrMessageEvent):
         """列出课表文件夹中的所有 .ics 文件。"""
         files = self._storage.list_ics_files()
+        dir_note = ""
+        if self._storage.ics_dir_fallback_reason:
+            dir_note = (
+                f"\n⚠️ 配置的课表文件夹不可用（{self._storage.ics_dir_fallback_reason}），"
+                f"当前使用默认文件夹。"
+            )
         if not files:
             yield event.plain_result(
-                f"课表文件夹（{self._storage.ics_dir}）中没有任何 .ics 文件。"
+                f"课表文件夹（{self._storage.ics_dir}）中没有任何 .ics 文件。{dir_note}"
             )
             return
         lines = [f"📄 {f}" for f in files]
@@ -256,7 +267,7 @@ class CourseReminderPlugin(Star):
         yield event.plain_result(
             "课表文件夹中的 .ics 文件：\n"
             + "\n".join(lines)
-            + f"\n\n📁 {self._storage.ics_dir}"
+            + f"\n\n📁 {self._storage.ics_dir}{dir_note}"
         )
 
     @filter.command("删除课表", alias={"解除绑定", "unbind"})
@@ -300,21 +311,41 @@ class CourseReminderPlugin(Star):
         """在课表文件夹中生成示例课表文件并绑定（测试辅助）。"""
         user_id = str(event.get_sender_id())
         nickname = str(event.get_sender_name())
-        ics_path = self._storage.get_sample_ics_path(user_id)
+
+        # 1) 生成示例课表内容
         try:
-            ics_path.write_text(build_sample_ics(), encoding="utf-8")
+            ics_text = build_sample_ics()
         except Exception as e:
-            logger.error(f"[course] write sample ics failed: {e}")
-            yield event.plain_result(
-                f"示例课表生成失败（请检查文件夹写入权限）：\n{self._storage.ics_dir}"
-            )
+            logger.error(f"[course] build sample ics failed: {e}", exc_info=True)
+            yield event.plain_result(f"示例课表生成失败：{e}\n请查看 AstrBot 日志获取详细信息。")
             return
+
+        # 2) 写入课表文件夹；失败时回退到插件数据目录
+        ics_path = self._storage.get_sample_ics_path(user_id)
+        bound_file = ics_path.name
+        try:
+            ics_path.write_text(ics_text, encoding="utf-8")
+        except OSError as e:
+            logger.warning(f"[course] write to ics_dir failed ({e}), fallback to data dir")
+            fallback_path = self._storage.fallback_dir / ics_path.name
+            try:
+                fallback_path.write_text(ics_text, encoding="utf-8")
+                ics_path = fallback_path
+                bound_file = str(fallback_path)
+            except OSError as e2:
+                logger.error(f"[course] write sample ics failed: {e2}")
+                yield event.plain_result(
+                    f"示例课表生成失败（无法写入文件夹）：\n"
+                    f"课表文件夹：{self._storage.ics_dir}\n原因：{e2}"
+                )
+                return
+
         self._parser.clear_cache(str(ics_path))
         self._storage.upsert_binding(
             user_id=user_id,
             unified_msg_origin=event.unified_msg_origin,
             nickname=nickname,
-            ics_file=ics_path.name,
+            ics_file=bound_file,
         )
         yield event.plain_result(
             f"已生成示例课表文件并绑定成功：{ics_path.name}\n"
@@ -550,10 +581,15 @@ class CourseReminderPlugin(Star):
 
     def _not_bound_text(self) -> str:
         files = self._storage.list_ics_files()
+        dir_note = (
+            f"\n⚠️ 配置的课表文件夹不可用，当前使用默认文件夹。"
+            if self._storage.ics_dir_fallback_reason
+            else ""
+        )
         if files:
             hint = (
                 "你还没有绑定课表。\n"
-                f"课表文件夹：{self._storage.ics_dir}\n"
+                f"课表文件夹：{self._storage.ics_dir}{dir_note}\n"
                 f"可用文件：\n"
                 + "\n".join(f"📄 {f}" for f in files)
                 + "\n请使用 /绑定课表 选择文件完成绑定（或 /示例课表 快速体验）。"
@@ -561,7 +597,7 @@ class CourseReminderPlugin(Star):
         else:
             hint = (
                 "你还没有绑定课表，且课表文件夹中没有任何 .ics 文件。\n"
-                f"请将课表 .ics 文件放入文件夹：\n{self._storage.ics_dir}\n"
+                f"请将课表 .ics 文件放入文件夹：\n{self._storage.ics_dir}{dir_note}\n"
                 "然后发送 /绑定课表 完成绑定（或 /示例课表 快速体验）。"
             )
         return hint
