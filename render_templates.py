@@ -1,4 +1,4 @@
-"""课程提醒插件 - 课表图片渲染模板（Jinja2 + HTML/CSS）。
+"""课铃（CourseBell）插件 - 课表图片渲染模板（Jinja2 + HTML/CSS）。
 
 AstrBot 通过 Star.html_render() 渲染为图片。
 模板均为竖屏设计（窄宽度、纵向排版），输出适合手机查看的竖版图片。

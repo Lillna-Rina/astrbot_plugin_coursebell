@@ -1,5 +1,11 @@
 # 更新日志
 
+## v1.3.0 (2026-08-31)
+
+- 插件更名：**课铃（CourseBell）**，插件名由 `astrbot_plugin_course_reminder` 改为 `astrbot_plugin_coursebell`（GitHub 仓库同步更名）
+- 自动迁移旧插件名数据目录中的绑定信息与课表文件，升级后无需重新绑定
+- README 改为社区标准格式（徽章、功能概览、命令表格、项目结构、Star History），新增 LICENSE（MIT）与 CHANGELOG
+
 ## v1.2.0 (2026-08-31)
 
 - 课表图片改为竖屏设计：今日/明日课表窄宽纵向卡片（420px），本周/下周课表由横向四列网格改为 7 天纵向列表

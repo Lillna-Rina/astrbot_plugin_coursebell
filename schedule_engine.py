@@ -1,4 +1,4 @@
-"""课程提醒插件 - 课表查询与提醒命中引擎。"""
+"""课铃（CourseBell）插件 - 课表查询与提醒命中引擎。"""
 
 from __future__ import annotations
 

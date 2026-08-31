@@ -1,4 +1,4 @@
-"""课程提醒插件（AstrBot Star）。
+"""课铃（CourseBell）—— AstrBot 课程提醒插件（Star）。
 
 课表来源：直接读取本地文件夹中的 .ics 文件（不依赖用户上传）。
 - 文件夹路径可在插件配置（_conf_schema.json 的 ics_dir）中指定，
@@ -8,7 +8,7 @@
 - 文件变更自动检测：把新课表文件放入文件夹即可，无需任何操作。
 
 功能：
-- /今日课表 /明日课表 /本周课表 /下周课表：查询课表（渲染为图片，失败时降级为文本）
+- /今日课表 /明日课表 /本周课表 /下周课表：查询课表（渲染为竖屏图片，失败时降级为文本）
 - 课前提醒：每 60 秒扫描，课程开始前自动发送提醒
 - /设置每日推送：每日定时推送当日课表
 - /设置提醒时间 /查看设置 /删除课表 /课表文件 /课表帮助
@@ -38,7 +38,8 @@ from .sample_ics import build_sample_ics
 from .schedule_engine import day_events, week_events, week_start, upcoming_events
 from .storage import CourseStorage, pick_ics_file
 
-PLUGIN_NAME = "astrbot_plugin_course_reminder"
+PLUGIN_NAME = "astrbot_plugin_coursebell"
+PLUGIN_DISPLAY_NAME = "课铃"
 WEEK_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
 # 会话等待超时（秒）
@@ -47,11 +48,11 @@ _BIND_TIMEOUT = 120
 
 @register(
     PLUGIN_NAME,
-    "CourseReminder",
-    "直接读取本地文件夹中的课表文件，可查看今日、明日、本周及下周的课表，支持课前提醒与每日定时推送课表。",
-    "1.1.0",
+    "Lillna-Rina",
+    "课铃：直接读取本地文件夹中的课表文件，可查看今日、明日、本周及下周的课表（竖屏图片），支持课前提醒与每日定时推送课表。",
+    "1.3.0",
 )
-class CourseReminderPlugin(Star):
+class CourseBellPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
         super().__init__(context, config)
         self._context = context
@@ -82,10 +83,12 @@ class CourseReminderPlugin(Star):
     # ------------------------------------------------------------------
     async def initialize(self):
         async with self._init_lock:
-            logger.info(f"[course] initializing... ics_dir={self._storage.ics_dir}")
+            logger.info(f"[coursebell] initializing... ics_dir={self._storage.ics_dir}")
+            if self._storage.migrated_from_legacy:
+                logger.info("[coursebell] migrated legacy data from astrbot_plugin_course_reminder")
             if self._storage.ics_dir_fallback_reason:
                 logger.warning(
-                    f"[course] configured ics_dir unavailable, using fallback dir: "
+                    f"[coursebell] configured ics_dir unavailable, using fallback dir: "
                     f"{self._storage.ics_dir_fallback_reason}"
                 )
             if self._reminder_task is not None and not self._reminder_task.done():
@@ -96,11 +99,11 @@ class CourseReminderPlugin(Star):
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
                 except Exception as e:
-                    logger.warning(f"[course] error cancelling old task: {e}")
+                    logger.warning(f"[coursebell] error cancelling old task: {e}")
             self._reminded.clear()
             self._stop_event.clear()
             self._reminder_task = asyncio.create_task(self._reminder_loop())
-            logger.info("[course] reminder loop started")
+            logger.info("[coursebell] reminder loop started")
 
         # 恢复所有用户的每日推送定时任务
         for user_id, binding in self._storage.load_bindings().items():
@@ -108,10 +111,10 @@ class CourseReminderPlugin(Star):
                 try:
                     await self._register_user_cron(user_id, binding.daily_push_time)
                 except Exception as e:
-                    logger.error(f"[course] restore cron failed for {user_id}: {e}")
+                    logger.error(f"[coursebell] restore cron failed for {user_id}: {e}")
 
     async def terminate(self):
-        logger.info("[course] terminating...")
+        logger.info("[coursebell] terminating...")
         self._stop_event.set()
         if self._reminder_task is not None:
             if not self._reminder_task.done():
@@ -121,10 +124,10 @@ class CourseReminderPlugin(Star):
                 except (asyncio.CancelledError, asyncio.TimeoutError):
                     pass
                 except Exception as e:
-                    logger.warning(f"[course] error cancelling task: {e}")
+                    logger.warning(f"[coursebell] error cancelling task: {e}")
             self._reminder_task = None
         self._reminded.clear()
-        logger.info("[course] terminated")
+        logger.info("[coursebell] terminated")
 
     # ------------------------------------------------------------------
     # 绑定解析
@@ -149,10 +152,10 @@ class CourseReminderPlugin(Star):
                     nickname=str(event.get_sender_name()),
                     ics_file=auto_file,
                 )
-                logger.info(f"[course] auto bound {user_id} -> {auto_file}")
+                logger.info(f"[coursebell] auto bound {user_id} -> {auto_file}")
                 return self._storage.get_binding(user_id)
             except Exception as e:
-                logger.warning(f"[course] auto bind failed for {user_id}: {e}")
+                logger.warning(f"[coursebell] auto bind failed for {user_id}: {e}")
         return None
 
     # ------------------------------------------------------------------
@@ -316,7 +319,7 @@ class CourseReminderPlugin(Star):
         try:
             ics_text = build_sample_ics()
         except Exception as e:
-            logger.error(f"[course] build sample ics failed: {e}", exc_info=True)
+            logger.error(f"[coursebell] build sample ics failed: {e}", exc_info=True)
             yield event.plain_result(f"示例课表生成失败：{e}\n请查看 AstrBot 日志获取详细信息。")
             return
 
@@ -326,14 +329,14 @@ class CourseReminderPlugin(Star):
         try:
             ics_path.write_text(ics_text, encoding="utf-8")
         except OSError as e:
-            logger.warning(f"[course] write to ics_dir failed ({e}), fallback to data dir")
+            logger.warning(f"[coursebell] write to ics_dir failed ({e}), fallback to data dir")
             fallback_path = self._storage.fallback_dir / ics_path.name
             try:
                 fallback_path.write_text(ics_text, encoding="utf-8")
                 ics_path = fallback_path
                 bound_file = str(fallback_path)
             except OSError as e2:
-                logger.error(f"[course] write sample ics failed: {e2}")
+                logger.error(f"[coursebell] write sample ics failed: {e2}")
                 yield event.plain_result(
                     f"示例课表生成失败（无法写入文件夹）：\n"
                     f"课表文件夹：{self._storage.ics_dir}\n原因：{e2}"
@@ -357,7 +360,7 @@ class CourseReminderPlugin(Star):
     @filter.command("课表帮助", alias={"课程帮助", "help"})
     async def help(self, event: AstrMessageEvent):
         yield event.plain_result(
-            "📚 课程提醒插件使用说明\n"
+            "🔔 课铃 · 课程提醒使用说明\n"
             "──────────────\n"
             "📁 课表文件放在本地文件夹（插件配置 ics_dir），插件直接读取\n"
             "📥 /绑定课表 [文件名]   选择文件夹中的课表文件绑定\n"
@@ -529,7 +532,7 @@ class CourseReminderPlugin(Star):
             )
             yield event.image_result(url)
         except Exception as e:
-            logger.warning(f"[course] day render failed, fallback to text: {e}")
+            logger.warning(f"[coursebell] day render failed, fallback to text: {e}")
             yield event.plain_result(
                 _format_day_text(title, target, courses, subtitle)
             )
@@ -574,7 +577,7 @@ class CourseReminderPlugin(Star):
             )
             yield event.image_result(url)
         except Exception as e:
-            logger.warning(f"[course] week render failed, fallback to text: {e}")
+            logger.warning(f"[coursebell] week render failed, fallback to text: {e}")
             yield event.plain_result(
                 _format_week_text(title, start, days, subtitle)
             )
@@ -609,7 +612,7 @@ class CourseReminderPlugin(Star):
         try:
             hour, minute = map(int, time_str.split(":"))
         except (ValueError, AttributeError):
-            logger.warning(f"[course] invalid push time: {time_str}")
+            logger.warning(f"[coursebell] invalid push time: {time_str}")
             return
 
         binding = self._storage.get_binding(user_id)
@@ -623,7 +626,7 @@ class CourseReminderPlugin(Star):
             try:
                 await self._context.cron_manager.delete_job(old_job_id)
             except Exception as e:
-                logger.debug(f"[course] cleanup old cron job {old_job_id}: {e}")
+                logger.debug(f"[coursebell] cleanup old cron job {old_job_id}: {e}")
 
         payload = {
             "user_id": user_id,
@@ -647,9 +650,9 @@ class CourseReminderPlugin(Star):
             if user_id in bindings:
                 bindings[user_id].daily_push_job_id = str(job.job_id)
                 self._storage.save_bindings(bindings)
-            logger.info(f"[course] daily push cron registered for {user_id} @ {time_str}")
+            logger.info(f"[coursebell] daily push cron registered for {user_id} @ {time_str}")
         except Exception as e:
-            logger.error(f"[course] register cron failed for {user_id}: {e}")
+            logger.error(f"[coursebell] register cron failed for {user_id}: {e}")
 
     async def _unregister_user_cron(self, user_id: str) -> None:
         binding = self._storage.get_binding(user_id)
@@ -658,7 +661,7 @@ class CourseReminderPlugin(Star):
             try:
                 await self._context.cron_manager.delete_job(job_id)
             except Exception as e:
-                logger.debug(f"[course] unregister cron job {job_id}: {e}")
+                logger.debug(f"[coursebell] unregister cron job {job_id}: {e}")
         bindings = self._storage.load_bindings()
         if user_id in bindings:
             bindings[user_id].daily_push_job_id = ""
@@ -674,7 +677,7 @@ class CourseReminderPlugin(Star):
         try:
             jobs = await self._context.cron_manager.list_jobs("basic")
         except Exception as e:
-            logger.debug(f"[course] list cron jobs failed: {e}")
+            logger.debug(f"[coursebell] list cron jobs failed: {e}")
             return job_ids
 
         for job in jobs:
@@ -730,7 +733,7 @@ class CourseReminderPlugin(Star):
                 chain = MessageChain([Image.fromURL(url)])
             except Exception as e:
                 logger.warning(
-                    f"[course] daily push render failed, fallback to text: {e}"
+                    f"[coursebell] daily push render failed, fallback to text: {e}"
                 )
                 chain = MessageChain().message(
                     _format_day_text(title, today, courses, subtitle)
@@ -739,7 +742,7 @@ class CourseReminderPlugin(Star):
             session = MessageSession.from_str(binding.unified_msg_origin)
             await self._context.send_message(session, chain)
         except Exception as e:
-            logger.error(f"[course] daily push failed for {user_id}: {e}")
+            logger.error(f"[coursebell] daily push failed for {user_id}: {e}")
 
     # ------------------------------------------------------------------
     # 课前提醒循环
@@ -749,7 +752,7 @@ class CourseReminderPlugin(Star):
             try:
                 await self._tick_reminder()
             except Exception as e:
-                logger.error(f"[course] reminder tick failed: {e}")
+                logger.error(f"[coursebell] reminder tick failed: {e}")
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=60)
             except asyncio.TimeoutError:
@@ -789,7 +792,7 @@ class CourseReminderPlugin(Star):
                         ),
                     )
             except Exception as e:
-                logger.error(f"[course] reminder failed for {user_id}: {e}")
+                logger.error(f"[coursebell] reminder failed for {user_id}: {e}")
 
     def _cleanup_reminded(self, now: datetime) -> None:
         """清理 30 天前的提醒记录，防止内存无限增长。"""

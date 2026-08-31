@@ -1,4 +1,4 @@
-"""课程提醒插件 - ICS 课表解析。
+"""课铃（CourseBell）插件 - ICS 课表解析。
 
 将 .ics 文件解析为 CourseEvent 列表：
 - 支持单次事件（DTSTART/DTEND）；

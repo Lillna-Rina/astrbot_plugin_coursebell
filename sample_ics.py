@@ -1,4 +1,4 @@
-"""课程提醒插件 - 示例课表生成器。
+"""课铃（CourseBell）插件 - 示例课表生成器。
 
 用于测试：生成一份包含固定每周课程 + 一节"即将开始"课程的 .ics 文件。
 绑定后即可体验课前提醒与每日推送功能。
@@ -36,7 +36,7 @@ def _build_fixed_event(
     event.add("location", location)
     event.add("dtstart", start)
     event.add("dtend", start + timedelta(minutes=minutes))
-    event.add("description", "示例课程（由课程提醒插件生成）")
+    event.add("description", "示例课程（由课铃（CourseBell）插件生成）")
     return event
 
 
@@ -51,7 +51,7 @@ def build_sample_ics(now: datetime | None = None) -> str:
         now = datetime.now(SHANGHAI_TZ)
 
     cal = Calendar()
-    cal.add("prodid", "-//CourseReminder//Sample//CN")
+    cal.add("prodid", "-//CourseBell//Sample//CN")
     cal.add("version", "2.0")
     cal.add("calscale", "GREGORIAN")
     cal.add("x-wr-calname", "示例课表")
@@ -85,7 +85,7 @@ def build_sample_ics(now: datetime | None = None) -> str:
         _build_fixed_event(
             test_start,
             45,
-            "课程提醒测试课",
+            "课铃测试课",
             "测试楼-T101",
         )
     )

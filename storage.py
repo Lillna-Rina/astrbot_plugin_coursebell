@@ -1,21 +1,26 @@
-"""课程提醒插件 - 数据持久化与本地课表文件管理。
+"""课铃（CourseBell）插件 - 数据持久化与本地课表文件管理。
 
 - 绑定信息存放在 AstrBot 插件数据目录的 bindings.json；
 - 课表 .ics 文件直接读取本地文件夹（ics_dir，可在插件配置中指定），
   插件只读文件、不依赖用户上传；
-- 支持按文件名自动匹配用户（文件名以用户 ID 开头，如 `123456.ics`）。
+- 支持按文件名自动匹配用户（文件名以用户 ID 开头，如 `123456.ics`）；
+- 自动迁移旧插件名（astrbot_plugin_course_reminder）的历史数据。
 """
 
 from __future__ import annotations
 
 import json
 import re
+import shutil
 import time
 from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from .course_types import UserBinding
+
+# 历史插件名（数据目录迁移用）
+_LEGACY_PLUGIN_NAME = "astrbot_plugin_course_reminder"
 
 
 def _safe_name(raw: str) -> str:
@@ -35,6 +40,8 @@ class CourseStorage:
         self.fallback_dir = self._base_dir / "ics"
         self.fallback_dir.mkdir(parents=True, exist_ok=True)
 
+        self.migrated_from_legacy = self._migrate_legacy_data()
+
         # 用户配置的课表文件夹；创建失败（无权限/跨平台路径等）时回退到默认目录
         self._ics_dir_fallback_reason = ""
         self.ics_dir = Path(ics_dir)
@@ -43,6 +50,35 @@ class CourseStorage:
         except OSError as e:
             self._ics_dir_fallback_reason = str(e)
             self.ics_dir = self.fallback_dir
+
+    def _migrate_legacy_data(self) -> bool:
+        """把旧插件名数据目录的内容迁移到新数据目录（一次性）。
+
+        插件由 astrbot_plugin_course_reminder 更名为 astrbot_plugin_coursebell，
+        数据目录随之变化；若无新数据且旧目录存在，则复制 bindings.json 与 ics 文件。
+        """
+        if self._bindings_file.exists():
+            return False
+        old_dir = self._base_dir.parent / _LEGACY_PLUGIN_NAME
+        try:
+            if not old_dir.is_dir():
+                return False
+            for item in old_dir.iterdir():
+                dst = self._base_dir / item.name
+                if item.is_dir():
+                    # 目录可能已被 fallback_dir 预创建，需要合并复制内容
+                    dst.mkdir(parents=True, exist_ok=True)
+                    for sub in item.iterdir():
+                        sub_dst = dst / sub.name
+                        if sub.is_dir():
+                            shutil.copytree(sub, sub_dst, dirs_exist_ok=True)
+                        elif not sub_dst.exists():
+                            shutil.copy2(sub, sub_dst)
+                elif not dst.exists():
+                    shutil.copy2(item, dst)
+            return True
+        except Exception:
+            return False
 
     @property
     def ics_dir_fallback_reason(self) -> str:

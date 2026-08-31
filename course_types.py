@@ -1,4 +1,4 @@
-"""课程提醒插件 - 数据模型定义。"""
+"""课铃（CourseBell）插件 - 数据模型定义。"""
 
 from __future__ import annotations
 

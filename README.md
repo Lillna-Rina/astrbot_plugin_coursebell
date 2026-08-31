@@ -1,8 +1,8 @@
-# AstrBot 课程提醒插件
+# 课铃（CourseBell）—— AstrBot 课程提醒插件
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/Version-v1.2.0-blue)
+![Version](https://img.shields.io/badge/Version-v1.3.0-blue)
 ![License](https://img.shields.io/badge/License-MIT-green)
 ![Python](https://img.shields.io/badge/Python-3.9+-yellow)
 
@@ -32,22 +32,22 @@
 
 ### 安装方式
 
-**从文件安装**：在插件界面右下角点击加号，选择「从文件安装」，上传本仓库 [Releases](https://github.com/Lillna-Rina/astrbot_plugin_course_reminder/releases) 中的 `astrbot_plugin_course_reminder.zip`。
+**从文件安装**：在插件界面右下角点击加号，选择「从文件安装」，上传本仓库 [Releases](https://github.com/Lillna-Rina/astrbot_plugin_coursebell/releases) 中的 `astrbot_plugin_coursebell.zip`。
 
 **链接安装**：在插件界面右下角点击加号，选择「从链接安装」，输入：
 
 ```text
-https://github.com/Lillna-Rina/astrbot_plugin_course_reminder
+https://github.com/Lillna-Rina/astrbot_plugin_coursebell
 ```
 
-依赖会按 [requirements.txt](https://github.com/Lillna-Rina/astrbot_plugin_course_reminder/blob/main/requirements.txt) 自动安装（`icalendar`、`python-dateutil`、`tzdata`）。
+依赖会按 [requirements.txt](https://github.com/Lillna-Rina/astrbot_plugin_coursebell/blob/main/requirements.txt) 自动安装（`icalendar`、`python-dateutil`、`tzdata`）。
 
 ## 最小配置
 
 插件配置中可设置：
 
 - `ics_dir`：本地课表文件夹路径（支持绝对路径如 `D:/课表`、`~/` 开头路径，或相对 AstrBot 运行目录的路径）；
-- **留空**时使用插件数据目录下的 `ics` 文件夹（`data/plugin_data/astrbot_plugin_course_reminder/ics/`），直接把 `.ics` 文件放进去即可；
+- **留空**时使用插件数据目录下的 `ics` 文件夹（`data/plugin_data/astrbot_plugin_coursebell/ics/`），直接把 `.ics` 文件放进去即可；
 - 文件夹无法创建或写入时会自动回退到默认目录，并在 `/课表文件` 中显示警告。
 
 常用入口：
@@ -79,13 +79,13 @@ https://github.com/Lillna-Rina/astrbot_plugin_course_reminder
 ## 数据存储
 
 - 课表文件：你指定的本地文件夹（插件只读）；
-- 绑定信息与设置：`data/plugin_data/astrbot_plugin_course_reminder/bindings.json`（插件重装/更新不会丢失）；
+- 绑定信息与设置：`data/plugin_data/astrbot_plugin_coursebell/bindings.json`（插件重装/更新不会丢失）；
 - 文件变更自动检测：每次读取前对比文件修改时间与大小，替换文件后无需任何操作即生效。
 
 ## 项目结构
 
 ```text
-astrbot_plugin_course_reminder/
+astrbot_plugin_coursebell/
 ├── main.py                 # 插件主入口（命令、提醒循环、每日推送）
 ├── ics_parser.py           # ICS 解析（RRULE 展开、EXDATE、时区换算）
 ├── schedule_engine.py      # 课表查询与提醒命中引擎
@@ -101,17 +101,17 @@ astrbot_plugin_course_reminder/
 
 ## 贡献
 
-欢迎提交 [Issue](https://github.com/Lillna-Rina/astrbot_plugin_course_reminder/issues) 和 [Pull Request](https://github.com/Lillna-Rina/astrbot_plugin_course_reminder/pulls)。
+欢迎提交 [Issue](https://github.com/Lillna-Rina/astrbot_plugin_coursebell/issues) 和 [Pull Request](https://github.com/Lillna-Rina/astrbot_plugin_coursebell/pulls)。
 
 ## 许可证
 
-MIT License - 详见 [LICENSE](https://github.com/Lillna-Rina/astrbot_plugin_course_reminder/blob/main/LICENSE)。
+MIT License - 详见 [LICENSE](https://github.com/Lillna-Rina/astrbot_plugin_coursebell/blob/main/LICENSE)。
 
 ## 相关链接
 
-- [项目地址](https://github.com/Lillna-Rina/astrbot_plugin_course_reminder)
-- [更新日志](https://github.com/Lillna-Rina/astrbot_plugin_course_reminder/blob/main/CHANGELOG.md)
-- [问题反馈](https://github.com/Lillna-Rina/astrbot_plugin_course_reminder/issues)
+- [项目地址](https://github.com/Lillna-Rina/astrbot_plugin_coursebell)
+- [更新日志](https://github.com/Lillna-Rina/astrbot_plugin_coursebell/blob/main/CHANGELOG.md)
+- [问题反馈](https://github.com/Lillna-Rina/astrbot_plugin_coursebell/issues)
 - [AstrBot](https://docs.astrbot.app/)
 - [WakeUp 课程表](https://www.wakeupcourse.com/)（导出 .ics 课表）
 - [参考项目：astrbot_plugin_course](https://github.com/PolysaCHride/astrbot_plugin_course)
@@ -125,10 +125,10 @@ MIT License - 详见 [LICENSE](https://github.com/Lillna-Rina/astrbot_plugin_cou
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=Lillna-Rina%2Fastrbot_plugin_course_reminder&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=Lillna-Rina%2Fastrbot_plugin_coursebell&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Lillna-Rina/astrbot_plugin_course_reminder&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Lillna-Rina/astrbot_plugin_course_reminder&type=date&theme=light&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Lillna-Rina/astrbot_plugin_course_reminder&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Lillna-Rina/astrbot_plugin_coursebell&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Lillna-Rina/astrbot_plugin_coursebell&type=date&theme=light&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Lillna-Rina/astrbot_plugin_coursebell&type=date&legend=top-left" />
  </picture>
 </a>
