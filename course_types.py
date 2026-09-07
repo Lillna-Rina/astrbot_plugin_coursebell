@@ -15,6 +15,7 @@ class CourseEvent:
     end_time: datetime
     location: str = ""
     description: str = ""
+    week_no: int = 0  # 校历周次（以学期第一周周一为第 1 周）；0 表示未知
 
     def reminder_key(self) -> str:
         """生成用于提醒去重的唯一键。"""

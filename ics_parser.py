@@ -4,14 +4,17 @@
 - 支持单次事件（DTSTART/DTEND）；
 - 支持重复事件（RRULE），展开为未来一年的所有发生实例；
 - 支持 EXDATE 排除日期；
+- 支持课程文本中的周次范围（如「4-5周」「2-16周」「单周」「双周」），
+  按校历周次过滤实例（需设置 term_start_date 或自动推断学期第一周）；
 - 所有时间统一转换为上海时区（UTC+8）。
 """
 
 from __future__ import annotations
 
 import os
+import re
 from datetime import date, datetime, time as dt_time, timedelta, timezone
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 from icalendar import Calendar
 from dateutil.rrule import rrulestr
@@ -23,14 +26,63 @@ SHANGHAI_TZ = timezone(timedelta(hours=8))
 # 展开重复事件的时间范围（从现在起的天数）
 _EXPAND_DAYS = 365
 
+# 课程文本中的周次范围，如「13-16周」「4-5周，7-12周」「第3周」
+_WEEK_RANGE_RE = re.compile(r"(\d{1,2})(?:\s*[-–—~～]\s*(\d{1,2}))?\s*周")
+# 单双周标记，如「单周」「双周」
+_ODD_EVEN_RE = re.compile(r"(单|双)\s*周")
+
+
+def extract_weeks(text: str) -> Optional[Set[int]]:
+    """从课程文本中提取上课周次集合。
+
+    匹配「N周」「N-M周」格式（「3-4节」这类节次不会被误匹配，因为以「节」结尾）。
+    返回 None 表示文本中没有周次信息（不过滤）；否则返回允许的周次集合。
+    """
+    if not text:
+        return None
+    weeks: Set[int] = set()
+    found = False
+    for m in _WEEK_RANGE_RE.finditer(text):
+        found = True
+        a = int(m.group(1))
+        b = int(m.group(2)) if m.group(2) else a
+        if a > b:
+            a, b = b, a
+        weeks.update(range(a, b + 1))
+    if not found:
+        return None
+    # 单双周限制：与范围取交集
+    odd_even = _ODD_EVEN_RE.findall(text)
+    if odd_even:
+        if "单" in odd_even:
+            weeks = {w for w in weeks if w % 2 == 1}
+        if "双" in odd_even:
+            weeks = {w for w in weeks if w % 2 == 0}
+    return weeks
+
 
 class IcsParser:
     def __init__(self):
         # path -> (mtime, size, events)
         self._cache: dict[str, Tuple[float, int, List[CourseEvent]]] = {}
+        # 手动设置的学期开始日期（校历第一周周一）
+        self._term_start: Optional[date] = None
+        # 最近一次解析实际使用的学期开始日期（手动或自动推断）
+        self._last_term_start: Optional[date] = None
 
     def clear_cache(self, ics_path: str) -> None:
         self._cache.pop(ics_path, None)
+
+    def set_term_start(self, term_start: Optional[date]) -> None:
+        """设置学期开始日期；变更后清空解析缓存使其生效。"""
+        if term_start != self._term_start:
+            self._term_start = term_start
+            self._cache.clear()
+
+    @property
+    def term_start(self) -> Optional[date]:
+        """最近一次解析使用的学期开始日期（手动设置或自动推断）。"""
+        return self._last_term_start
 
     def parse_ics_file(self, file_path: str) -> List[CourseEvent]:
         """解析 ICS 文件，返回按开始时间排序的课程列表（带缓存）。
@@ -67,13 +119,22 @@ class IcsParser:
             return []
 
         today = datetime.now(SHANGHAI_TZ).date()
+        # 学期开始日期：优先使用手动设置，否则自动推断为
+        # 文件中最早课程所在周的周一（高校课表通常从学期第一周开始排课）
+        term_start = self._term_start
+        if term_start is None:
+            earliest = self._find_earliest_start(cal)
+            if earliest is not None:
+                term_start = earliest - timedelta(days=earliest.weekday())
+        self._last_term_start = term_start
+
         events: List[CourseEvent] = []
 
         for component in cal.walk():
             if component.name != "VEVENT":
                 continue
             try:
-                event = self._parse_vevent(component, today)
+                event = self._parse_vevent(component, today, term_start)
                 if event:
                     events.extend(event)
             except Exception:
@@ -83,11 +144,35 @@ class IcsParser:
         events.sort(key=lambda e: e.start_time)
         return events
 
+    @staticmethod
+    def _find_earliest_start(cal) -> Optional[date]:
+        """找出日历中所有事件最早的 DTSTART 日期（本地时区）。"""
+        earliest: Optional[date] = None
+        for component in cal.walk():
+            if component.name != "VEVENT":
+                continue
+            dtstart_raw = component.get("dtstart")
+            if dtstart_raw is None:
+                continue
+            try:
+                d = IcsParser._to_aware_local(dtstart_raw.dt).date()
+            except Exception:
+                continue
+            if earliest is None or d < earliest:
+                earliest = d
+        return earliest
+
+    def _week_no(self, day: date, term_start: Optional[date]) -> int:
+        """计算日期对应的校历周次；学期开始前为 0，未知为 0。"""
+        if term_start is None:
+            return 0
+        return (day - term_start).days // 7 + 1
+
     # ------------------------------------------------------------------
     # 内部实现
     # ------------------------------------------------------------------
     def _parse_vevent(
-        self, component, today: date
+        self, component, today: date, term_start: Optional[date]
     ) -> Optional[List[CourseEvent]]:
         summary = str(component.get("summary") or "")
         description = str(component.get("description") or "")
@@ -106,11 +191,15 @@ class IcsParser:
         # 排除日期（EXDATE）
         excluded = self._collect_exdates(component)
 
+        # 课程文本中的周次限制（如「4-5周」「2-16周」「单周」）
+        allowed_weeks = extract_weeks(f"{summary} {description}")
+
         rrule = component.get("rrule")
         if rrule is not None:
             try:
                 expanded = self._expand_recurring(
-                    summary, description, location, dtstart, duration, rrule, excluded
+                    summary, description, location, dtstart, duration, rrule,
+                    excluded, allowed_weeks, term_start,
                 )
                 return expanded
             except Exception:
@@ -120,6 +209,9 @@ class IcsParser:
 
         # 单次事件：只保留今天及以后
         if dtstart.date() >= today and dtstart not in excluded:
+            week_no = self._week_no(dtstart.date(), term_start)
+            if not self._week_allowed(week_no, allowed_weeks):
+                return None
             return [
                 CourseEvent(
                     summary=summary,
@@ -127,9 +219,20 @@ class IcsParser:
                     location=location,
                     start_time=dtstart,
                     end_time=dtend,
+                    week_no=week_no,
                 )
             ]
         return None
+
+    @staticmethod
+    def _week_allowed(week_no: int, allowed_weeks: Optional[Set[int]]) -> bool:
+        """按校历周次过滤；无周次信息的课程不过滤。"""
+        if allowed_weeks is None:
+            return True
+        if week_no <= 0:
+            # 学期开始前的实例无法确定周次，保守丢弃
+            return False
+        return week_no in allowed_weeks
 
     @staticmethod
     def _to_aware_local(dt) -> datetime:
@@ -163,6 +266,8 @@ class IcsParser:
         duration: timedelta,
         rrule,
         excluded: set,
+        allowed_weeks: Optional[Set[int]] = None,
+        term_start: Optional[date] = None,
     ) -> List[CourseEvent]:
         """展开 RRULE 重复事件。
 
@@ -194,6 +299,9 @@ class IcsParser:
             occ_local = occ_utc.astimezone(SHANGHAI_TZ)
             if occ_local in excluded:
                 continue
+            week_no = self._week_no(occ_local.date(), term_start)
+            if not self._week_allowed(week_no, allowed_weeks):
+                continue
             events.append(
                 CourseEvent(
                     summary=summary,
@@ -201,6 +309,7 @@ class IcsParser:
                     location=location,
                     start_time=occ_local,
                     end_time=occ_local + duration,
+                    week_no=week_no,
                 )
             )
         return events

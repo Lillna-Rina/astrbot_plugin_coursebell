@@ -51,7 +51,7 @@ _BIND_TIMEOUT = 120
     PLUGIN_NAME,
     "Lillna-Rina",
     "课铃：直接读取本地文件夹中的课表文件，可查看今日、明日、本周及下周的课表（竖屏图片），支持课前提醒与每日定时推送课表。",
-    "1.3.0",
+    "1.5.1",
 )
 class CourseBellPlugin(Star):
     def __init__(self, context: Context, config: dict | None = None):
@@ -62,11 +62,35 @@ class CourseBellPlugin(Star):
         self._base_dir = StarTools.get_data_dir(plugin_name)
         self._storage = CourseStorage(self._base_dir, self._resolve_ics_dir())
         self._parser = IcsParser()
+        # 学期开始日期（校历第一周周一）：可配置，用于按周次过滤课程
+        term_start = self._parse_term_start(self._config.get("term_start_date"))
+        if term_start is not None:
+            self._parser.set_term_start(term_start)
+            logger.info(f"[coursebell] term_start manually set to {term_start}")
 
         self._reminded: Dict[str, Set[str]] = {}
         self._stop_event = asyncio.Event()
         self._reminder_task: Optional[asyncio.Task] = None
         self._init_lock = asyncio.Lock()
+
+    @staticmethod
+    def _parse_term_start(raw) -> Optional[date]:
+        """解析配置中的学期开始日期（YYYY-MM-DD）；无效返回 None。"""
+        s = str(raw or "").strip()
+        if not s:
+            return None
+        try:
+            return datetime.strptime(s, "%Y-%m-%d").date()
+        except ValueError:
+            logger.warning(f"[coursebell] invalid term_start_date {s!r}, ignored")
+            return None
+
+    def _current_week_no(self) -> Optional[int]:
+        """当前日期对应的校历周次（基于最近一次解析推断的学期开始日期）。"""
+        term_start = self._parser.term_start
+        if term_start is None:
+            return None
+        return (datetime.now(SHANGHAI_TZ).date() - term_start).days // 7 + 1
 
     def _resolve_ics_dir(self) -> Path:
         """根据插件配置解析课表文件夹路径。
@@ -570,6 +594,14 @@ class CourseBellPlugin(Star):
         if not binding:
             yield event.plain_result(self._not_bound_text())
             return
+        term_note = ""
+        if self._parser.term_start:
+            week_no = self._current_week_no()
+            term_note = (
+                f"\n学期开始：{self._parser.term_start}（第{week_no}周）"
+                if week_no and week_no > 0
+                else f"\n学期开始：{self._parser.term_start}"
+            )
         yield event.plain_result(
             "当前设置：\n"
             f"课表文件：{binding.ics_file}\n"
@@ -577,6 +609,7 @@ class CourseBellPlugin(Star):
             f"每日推送：{'已开启' if binding.enable_daily_push else '已关闭'}\n"
             f"推送时间：{binding.daily_push_time}\n"
             f"提前提醒：{binding.reminder_advance_minutes} 分钟"
+            f"{term_note}"
         )
 
     # ------------------------------------------------------------------
@@ -644,6 +677,10 @@ class CourseBellPlugin(Star):
 
         title = "本周课表" if offset_weeks == 0 else "下周课表"
         subtitle = f"{binding.nickname} | {start.strftime('%m-%d')} ~ {(start + timedelta(days=6)).strftime('%m-%d')}"
+        # 校历周次提示（如「第2周」），学期开始日期未知时不显示
+        week_no = (start - self._parser.term_start).days // 7 + 1 if self._parser.term_start else None
+        if week_no and week_no > 0:
+            subtitle += f" | 第{week_no}周"
         try:
             url = await self.html_render(
                 WEEK_TMPL,
