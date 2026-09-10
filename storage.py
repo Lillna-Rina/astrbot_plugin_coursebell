@@ -17,7 +17,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .course_types import UserBinding
+from .course_types import Countdown, UserBinding
 
 # 历史插件名（数据目录迁移用）
 _LEGACY_PLUGIN_NAME = "astrbot_plugin_course_reminder"
@@ -188,8 +188,68 @@ class CourseStorage:
                     item.get("reminder_advance_minutes", 15)
                 ),
                 daily_push_job_id=str(item.get("daily_push_job_id", "")),
+                date_map=self._load_date_map(item.get("date_map")),
+                countdowns=self._load_countdowns(item.get("countdowns")),
+                countdown_job_ids=self._load_job_ids(item.get("countdown_job_ids")),
             )
         return bindings
+
+    @staticmethod
+    def _load_date_map(raw) -> Dict[str, str]:
+        """读取调休映射（兼容脏数据）。"""
+        if not isinstance(raw, dict):
+            return {}
+        out: Dict[str, str] = {}
+        for k, v in raw.items():
+            key = str(k).strip()
+            if key:
+                out[key] = str(v).strip()
+        return out
+
+    @staticmethod
+    def _load_countdowns(raw) -> List[Countdown]:
+        """读取倒计时列表（兼容脏数据）。"""
+        if not isinstance(raw, list):
+            return []
+        out: List[Countdown] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name", "")).strip()
+            date_str = str(item.get("date", "")).strip()
+            if not name or not date_str:
+                continue
+            mode = str(item.get("mode", "daily")).strip().lower()
+            if mode not in ("daily", "weekly", "off"):
+                mode = "daily"
+            out.append(
+                Countdown(
+                    name=name,
+                    date=date_str,
+                    mode=mode,
+                    push_time=str(item.get("push_time", "08:00")),
+                )
+            )
+        return out
+
+    @staticmethod
+    def _load_job_ids(raw) -> Dict[str, str]:
+        if not isinstance(raw, dict):
+            return {}
+        return {str(k): str(v) for k, v in raw.items()}
+
+    def update_binding(self, user_id: str, **fields) -> Optional[UserBinding]:
+        """更新绑定的部分字段并保存（返回更新后的绑定）。"""
+        bindings = self.load_bindings()
+        binding = bindings.get(user_id)
+        if binding is None:
+            return None
+        for key, value in fields.items():
+            if hasattr(binding, key):
+                setattr(binding, key, value)
+        bindings[user_id] = binding
+        self.save_bindings(bindings)
+        return binding
 
     def save_bindings(self, bindings: Dict[str, UserBinding]) -> None:
         payload = {
@@ -230,6 +290,9 @@ class CourseStorage:
                 prev.reminder_advance_minutes if prev else 15
             ),
             daily_push_job_id=prev.daily_push_job_id if prev else "",
+            date_map=dict(prev.date_map) if prev else {},
+            countdowns=list(prev.countdowns) if prev else [],
+            countdown_job_ids=dict(prev.countdown_job_ids) if prev else {},
         )
         bindings[user_id] = binding
         self.save_bindings(bindings)

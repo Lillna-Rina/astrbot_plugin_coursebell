@@ -32,11 +32,25 @@ from astrbot.core.platform.message_session import MessageSession
 from astrbot.core.utils.io import download_file
 from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
-from .course_types import CourseEvent, UserBinding
+from .command_parsers import (
+    MODE_TEXT,
+    parse_countdown_args as _parse_countdown_args,
+    parse_date_map_args as _parse_date_map_args,
+    pretty_md as _pretty_md,
+)
+from .course_types import Countdown, CourseEvent, UserBinding
 from .ics_parser import IcsParser, SHANGHAI_TZ
 from .render_templates import DAY_TMPL, WEEK_TMPL
 from .sample_ics import build_sample_ics
-from .schedule_engine import day_events, week_events, week_start, upcoming_events
+from .schedule_engine import (
+    date_map_note,
+    day_events,
+    day_events_mapped,
+    normalize_map_date,
+    upcoming_events,
+    week_events_mapped,
+    week_start,
+)
 from .storage import CourseStorage, pick_ics_file
 
 PLUGIN_NAME = "astrbot_plugin_coursebell"
@@ -92,6 +106,37 @@ class CourseBellPlugin(Star):
             return None
         return (datetime.now(SHANGHAI_TZ).date() - term_start).days // 7 + 1
 
+    def _nearest_countdown_text(self, binding: UserBinding) -> str:
+        """课表图片上显示的最近一个倒计时（无则返回空字符串）。"""
+        if not binding.countdowns:
+            return ""
+        today = datetime.now(SHANGHAI_TZ).date()
+        pending = [c for c in binding.countdowns if c.days_left(today) >= 0]
+        if not pending:
+            return ""
+        nearest = min(pending, key=lambda c: c.days_left(today))
+        left = nearest.days_left(today)
+        return f"⏳ {nearest.name} {'就是今天' if left == 0 else f'还有 {left} 天'}"
+
+    def _countdown_settings_text(self, binding: UserBinding) -> str:
+        if not binding.countdowns:
+            return "\n倒计时：未设置"
+        today = datetime.now(SHANGHAI_TZ).date()
+        items = "、".join(
+            f"{c.name}({c.days_left(today)}天)" for c in binding.countdowns
+        )
+        return f"\n倒计时：{items}"
+
+    def _date_map_settings_text(self, binding: UserBinding) -> str:
+        if not binding.date_map:
+            return "\n调休：未设置"
+        items = "、".join(
+            f"{_pretty_md(k)}"
+            + ("放假" if normalize_map_date(v) == "off" else f"→{_pretty_md(v)}")
+            for k, v in sorted(binding.date_map.items())
+        )
+        return f"\n调休：{items}"
+
     def _resolve_ics_dir(self) -> Path:
         """根据插件配置解析课表文件夹路径。
 
@@ -137,6 +182,17 @@ class CourseBellPlugin(Star):
                     await self._register_user_cron(user_id, binding.daily_push_time)
                 except Exception as e:
                     logger.error(f"[coursebell] restore cron failed for {user_id}: {e}")
+            # 恢复倒计时通知任务
+            for cd in binding.countdowns:
+                if cd.mode == "off":
+                    continue
+                try:
+                    await self._register_countdown_cron(user_id, cd)
+                except Exception as e:
+                    logger.error(
+                        f"[coursebell] restore countdown cron failed for "
+                        f"{user_id}/{cd.name}: {e}"
+                    )
 
     async def terminate(self):
         logger.info("[coursebell] terminating...")
@@ -466,13 +522,18 @@ class CourseBellPlugin(Star):
             "🔔 课铃 · 课程提醒使用说明\n"
             "──────────────\n"
             "📁 课表文件放在本地文件夹（插件配置 ics_dir），插件直接读取\n"
-            "📥 /绑定课表 [文件名]   选择文件夹中的课表文件绑定\n"
+            "📥 /绑定课表 [文件名]   选择文件绑定，也可直接发送 .ics 文件\n"
             "🗂 /课表文件   查看文件夹中的课表文件\n"
             "🗑 /删除课表   解除绑定（不删除文件）\n"
             "📅 /今日课表 /明日课表\n"
             "🗓 /本周课表 /下周课表\n"
             "⏰ /设置提醒时间   课前提醒提前分钟数（1-120）\n"
             "📤 /设置每日推送   每日定时推送课表（开启 HH:MM / 关闭）\n"
+            "⏳ /设置倒计时 考研 2026-12-26 [每日|每周|关闭] [HH:MM]\n"
+            "　 /倒计时   查看全部倒计时　/删除倒计时 名称\n"
+            "🔄 /设置调休 09-27=10-07   把 9月27日 调为 10月7日 的课表\n"
+            "　 /设置调休 10-07=放假   设为放假无课\n"
+            "　 /查看调休　/删除调休 09-27　/清空调休\n"
             "⚙️ /查看设置   查看当前配置\n"
             "🧪 /示例课表   生成示例课表文件用于测试"
         )
@@ -610,7 +671,249 @@ class CourseBellPlugin(Star):
             f"推送时间：{binding.daily_push_time}\n"
             f"提前提醒：{binding.reminder_advance_minutes} 分钟"
             f"{term_note}"
+            f"{self._countdown_settings_text(binding)}"
+            f"{self._date_map_settings_text(binding)}"
         )
+
+    # ------------------------------------------------------------------
+    # 日期倒计时（考研倒计时等）
+    # ------------------------------------------------------------------
+    @filter.command("设置倒计时", alias={"添加倒计时", "countdown"})
+    async def set_countdown(self, event: AstrMessageEvent, args: str = ""):
+        """添加/更新日期倒计时。
+
+        用法：/设置倒计时 <名称> <日期> [每日|每周|关闭] [HH:MM]
+        示例：/设置倒计时 考研 2026-12-26 每日 08:00
+        """
+        user_id = str(event.get_sender_id())
+        binding = self._resolve_binding(user_id, event)
+        if not binding:
+            yield event.plain_result(self._not_bound_text())
+            return
+
+        raw = str(args or "").strip()
+        if not raw:
+            yield event.plain_result(
+                "请发送倒计时信息，格式：\n"
+                "/设置倒计时 <名称> <日期> [每日|每周|关闭] [HH:MM]\n"
+                "示例：\n"
+                "  /设置倒计时 考研 2026-12-26\n"
+                "  /设置倒计时 考研 2026-12-26 每日 08:00\n"
+                "  /设置倒计时 期末 2027-01-10 每周\n"
+                "（不写通知方式时默认每日通知，默认时间 08:00）"
+            )
+            return
+
+        parsed = _parse_countdown_args(raw)
+        if parsed is None:
+            yield event.plain_result(
+                "格式不正确。请使用：/设置倒计时 <名称> <日期> [每日|每周|关闭] [HH:MM]\n"
+                "示例：/设置倒计时 考研 2026-12-26 每日 08:00"
+            )
+            return
+        name, date_str, mode, push_time = parsed
+
+        binding = self._storage.get_binding(user_id) or binding
+        target = Countdown(name=name, date=date_str, mode=mode, push_time=push_time)
+        others = [c for c in binding.countdowns if c.name.strip().lower() != name.strip().lower()]
+        self._storage.update_binding(user_id, countdowns=others + [target])
+        await self._register_countdown_cron(user_id, target)
+
+        days_left = target.days_left(datetime.now(SHANGHAI_TZ).date())
+        mode_text = MODE_TEXT[mode]
+        yield event.plain_result(
+            f"✅ 已设置倒计时「{name}」\n"
+            f"目标日期：{date_str}\n"
+            f"剩余天数：{days_left} 天\n"
+            f"通知方式：{mode_text}"
+            + (f"（{push_time}）" if mode != "off" else "")
+            + "\n\n发送 /倒计时 可查看全部倒计时。"
+        )
+
+    @filter.command("倒计时", alias={"查看倒计时", "countdowns"})
+    async def list_countdowns(self, event: AstrMessageEvent):
+        user_id = str(event.get_sender_id())
+        binding = self._resolve_binding(user_id, event)
+        if not binding:
+            yield event.plain_result(self._not_bound_text())
+            return
+        if not binding.countdowns:
+            yield event.plain_result(
+                "还没有设置倒计时。\n"
+                "使用 /设置倒计时 考研 2026-12-26 即可添加（支持每日/每周通知）。"
+            )
+            return
+
+        today = datetime.now(SHANGHAI_TZ).date()
+        lines = []
+        for c in sorted(binding.countdowns, key=lambda x: x.days_left(today)):
+            left = c.days_left(today)
+            if left > 0:
+                remain = f"还有 {left} 天"
+            elif left == 0:
+                remain = "就是今天 🎯"
+            else:
+                remain = f"已过去 {-left} 天"
+            mode_text = MODE_TEXT[c.mode]
+            lines.append(f"⏳ {c.name}：{c.date}（{remain}）· {mode_text}")
+        yield event.plain_result("倒计时：\n" + "\n".join(lines))
+
+    @filter.command("删除倒计时", alias={"移除倒计时", "delcountdown"})
+    async def delete_countdown(self, event: AstrMessageEvent, args: str = ""):
+        user_id = str(event.get_sender_id())
+        binding = self._resolve_binding(user_id, event)
+        if not binding:
+            yield event.plain_result(self._not_bound_text())
+            return
+        name = str(args or "").strip()
+        if not name:
+            if not binding.countdowns:
+                yield event.plain_result("还没有设置倒计时。")
+                return
+            yield event.plain_result(
+                "请指定要删除的倒计时名称，例如：/删除倒计时 考研\n"
+                "当前倒计时：" + "、".join(c.name for c in binding.countdowns)
+            )
+            return
+
+        target = binding.get_countdown(name)
+        if target is None:
+            yield event.plain_result(
+                f"没有找到倒计时「{name}」。\n"
+                "当前倒计时：" + "、".join(c.name for c in binding.countdowns)
+            )
+            return
+
+        remaining = [
+            c for c in binding.countdowns if c.name.strip().lower() != name.strip().lower()
+        ]
+        self._storage.update_binding(user_id, countdowns=remaining)
+        await self._unregister_countdown_cron(user_id, target.name)
+        yield event.plain_result(f"已删除倒计时「{target.name}」。")
+
+    # ------------------------------------------------------------------
+    # 调休映射
+    # ------------------------------------------------------------------
+    @filter.command("设置调休", alias={"调休", "swapday"})
+    async def set_date_map(self, event: AstrMessageEvent, args: str = ""):
+        """设置调休映射。
+
+        用法：/设置调休 <日期>=<按哪天的课表> [更多...]
+        示例：
+          /设置调休 09-27=10-07    → 9月27日 上 10月7日 的课
+          /设置调休 10-07=放假      → 10月7日 放假无课
+        """
+        user_id = str(event.get_sender_id())
+        binding = self._resolve_binding(user_id, event)
+        if not binding:
+            yield event.plain_result(self._not_bound_text())
+            return
+
+        raw = str(args or "").strip()
+        if not raw:
+            yield event.plain_result(
+                "请按以下格式设置调休：\n"
+                "/设置调休 <日期>=<上哪天的课>\n"
+                "示例：\n"
+                "  /设置调休 09-27=10-07   （9月27日 上 10月7日 的课）\n"
+                "  /设置调休 10-07=放假     （10月7日 放假无课）\n"
+                "可一次设置多条，用空格分隔。"
+            )
+            return
+
+        rules = _parse_date_map_args(raw)
+        if not rules:
+            yield event.plain_result(
+                "格式不正确，请使用「日期=目标日期」，例如：/设置调休 09-27=10-07"
+            )
+            return
+
+        date_map = dict(binding.date_map)
+        date_map.update(rules)
+        self._storage.update_binding(user_id, date_map=date_map)
+
+        lines = []
+        for src, dst in rules.items():
+            if dst == "off":
+                lines.append(f"• {_pretty_md(src)}：放假无课")
+            else:
+                lines.append(f"• {_pretty_md(src)}：按 {_pretty_md(dst)} 的课表上课")
+        yield event.plain_result(
+            "✅ 已设置调休：\n" + "\n".join(lines) + "\n\n"
+            "该日期的课表查询、每日推送与课前提醒都会按调休后的课表执行。\n"
+            "发送 /查看调休 可查看全部规则。"
+        )
+
+    @filter.command("查看调休", alias={"调休列表", "swaplist"})
+    async def list_date_map(self, event: AstrMessageEvent):
+        user_id = str(event.get_sender_id())
+        binding = self._resolve_binding(user_id, event)
+        if not binding:
+            yield event.plain_result(self._not_bound_text())
+            return
+        if not binding.date_map:
+            yield event.plain_result(
+                "还没有设置调休规则。\n"
+                "使用 /设置调休 09-27=10-07 可把 9月27日 调为 10月7日 的课表。"
+            )
+            return
+        lines = []
+        for src in sorted(binding.date_map.keys()):
+            dst = binding.date_map[src]
+            if normalize_map_date(dst) == "off":
+                lines.append(f"• {_pretty_md(src)}：放假无课")
+            else:
+                lines.append(f"• {_pretty_md(src)}：按 {_pretty_md(dst)} 的课表上课")
+        yield event.plain_result("当前调休规则：\n" + "\n".join(lines))
+
+    @filter.command("删除调休", alias={"取消调休", "delswap"})
+    async def delete_date_map(self, event: AstrMessageEvent, args: str = ""):
+        user_id = str(event.get_sender_id())
+        binding = self._resolve_binding(user_id, event)
+        if not binding:
+            yield event.plain_result(self._not_bound_text())
+            return
+        raw = str(args or "").strip()
+        if not raw:
+            if not binding.date_map:
+                yield event.plain_result("还没有设置调休规则。")
+                return
+            yield event.plain_result(
+                "请指定要删除的日期，例如：/删除调休 09-27\n"
+                "发送 /清空调休 可删除全部规则。\n"
+                "当前规则：" + "、".join(sorted(binding.date_map.keys()))
+            )
+            return
+
+        key = normalize_map_date(raw)
+        if key is None or key == "off":
+            yield event.plain_result(
+                f"日期格式不正确：{raw}（应为 09-27 或 2026-09-27 形式）"
+            )
+            return
+        date_map = dict(binding.date_map)
+        if key not in date_map:
+            yield event.plain_result(
+                f"没有找到 {_pretty_md(key)} 的调休规则。\n"
+                "当前规则：" + "、".join(sorted(date_map.keys()))
+            )
+            return
+        date_map.pop(key)
+        self._storage.update_binding(user_id, date_map=date_map)
+        yield event.plain_result(f"已删除 {_pretty_md(key)} 的调休规则。")
+
+    @filter.command("清空调休", alias={"cleardateMap", "cleardatemap"})
+    async def clear_date_map(self, event: AstrMessageEvent):
+        user_id = str(event.get_sender_id())
+        binding = self._storage.get_binding(user_id)
+        if not binding:
+            yield event.plain_result(self._not_bound_text())
+            return
+        if not binding.date_map:
+            yield event.plain_result("还没有设置调休规则。")
+            return
+        self._storage.update_binding(user_id, date_map={})
+        yield event.plain_result("已清空全部调休规则。")
 
     # ------------------------------------------------------------------
     # 课表渲染（图片优先，失败降级为文本）
@@ -626,10 +929,16 @@ class CourseBellPlugin(Star):
             str(self._storage.ics_abs_path(binding))
         )
         target = datetime.now(SHANGHAI_TZ).date() + timedelta(days=day_offset)
-        courses = [_event_view(e) for e in day_events(events, target)]
+        # 调休映射：当天可能上的是别的日期的课
+        courses = [
+            _event_view(e) for e in day_events_mapped(events, target, binding.date_map)
+        ]
+        swap_note = date_map_note(target, binding.date_map)
 
         title = "今日课表" if day_offset == 0 else "明日课表"
         subtitle = f"{binding.nickname} | {_format_date_cn(target)}"
+        if swap_note:
+            subtitle += f" | {swap_note}"
         try:
             url = await self.html_render(
                 DAY_TMPL,
@@ -638,6 +947,8 @@ class CourseBellPlugin(Star):
                     "subtitle": subtitle,
                     "date_str": target.strftime("%m-%d"),
                     "courses": courses,
+                    "swap_note": swap_note,
+                    "countdown": self._nearest_countdown_text(binding),
                     "page_width": 420,
                     "page_height": 560,
                 },
@@ -663,6 +974,8 @@ class CourseBellPlugin(Star):
         today = datetime.now(SHANGHAI_TZ).date()
         start = week_start(today) + timedelta(weeks=offset_weeks)
 
+        # 调休映射：逐天取实际要上的课，并记录调休说明
+        week_days, week_notes = week_events_mapped(events, start, binding.date_map)
         days = []
         for i in range(7):
             d = start + timedelta(days=i)
@@ -671,7 +984,8 @@ class CourseBellPlugin(Star):
                     "label": WEEK_LABELS[i],
                     "date_str": d.strftime("%m-%d"),
                     "is_today": d == today,
-                    "courses": [_event_view(e) for e in day_events(events, d)],
+                    "courses": [_event_view(e) for e in week_days[i]],
+                    "swap_note": week_notes[i],
                 }
             )
 
@@ -832,9 +1146,16 @@ class CourseBellPlugin(Star):
                 str(self._storage.ics_abs_path(binding))
             )
             today = datetime.now(SHANGHAI_TZ).date()
-            courses = [_event_view(e) for e in day_events(events, today)]
+            # 调休映射：当天可能上的是别的日期的课
+            courses = [
+                _event_view(e)
+                for e in day_events_mapped(events, today, binding.date_map)
+            ]
+            swap_note = date_map_note(today, binding.date_map)
             title = "今日课表"
             subtitle = f"{binding.nickname} | {_format_date_cn(today)}"
+            if swap_note:
+                subtitle += f" | {swap_note}"
 
             try:
                 url = await self.html_render(
@@ -844,6 +1165,8 @@ class CourseBellPlugin(Star):
                         "subtitle": subtitle,
                         "date_str": today.strftime("%m-%d"),
                         "courses": courses,
+                        "swap_note": swap_note,
+                        "countdown": self._nearest_countdown_text(binding),
                         "page_width": 420,
                         "page_height": 560,
                     },
@@ -862,6 +1185,135 @@ class CourseBellPlugin(Star):
             await self._context.send_message(session, chain)
         except Exception as e:
             logger.error(f"[coursebell] daily push failed for {user_id}: {e}")
+
+    # ------------------------------------------------------------------
+    # 倒计时通知（cron）
+    # ------------------------------------------------------------------
+    async def _register_countdown_cron(self, user_id: str, cd: Countdown) -> None:
+        """为某个倒计时注册通知任务（每日 / 每周 / 关闭）。"""
+        await self._unregister_countdown_cron(user_id, cd.name)
+        if cd.mode == "off":
+            return
+
+        binding = self._storage.get_binding(user_id)
+        if not binding:
+            return
+        try:
+            hour, minute = map(int, str(cd.push_time).split(":"))
+        except (ValueError, AttributeError):
+            hour, minute = 8, 0
+        if cd.mode == "weekly":
+            cron_expr = f"{minute} {hour} * * 1"  # 每周一
+            job_name = f"倒计时每周通知_{user_id}_{cd.name}"
+        else:
+            cron_expr = f"{minute} {hour} * * *"  # 每天
+            job_name = f"倒计时每日通知_{user_id}_{cd.name}"
+
+        payload = {
+            "user_id": user_id,
+            "unified_msg_origin": binding.unified_msg_origin,
+            "nickname": binding.nickname,
+            "kind": "countdown",
+            "countdown": cd.name,
+        }
+        try:
+            job = await self._context.cron_manager.add_basic_job(
+                name=job_name,
+                cron_expression=cron_expr,
+                handler=self._countdown_push_handler,
+                description=f"日期倒计时通知（{cd.name}）",
+                timezone="Asia/Shanghai",
+                payload=payload,
+                enabled=True,
+                persistent=True,
+            )
+            latest = self._storage.get_binding(user_id)
+            if latest:
+                ids = dict(latest.countdown_job_ids)
+                ids[cd.name] = str(job.job_id)
+                self._storage.update_binding(user_id, countdown_job_ids=ids)
+            logger.info(
+                f"[coursebell] countdown cron registered: {cd.name} "
+                f"({cd.mode} @ {cd.push_time}) for {user_id}"
+            )
+        except Exception as e:
+            logger.error(f"[coursebell] register countdown cron failed: {e}")
+
+    async def _unregister_countdown_cron(self, user_id: str, name: str) -> None:
+        binding = self._storage.get_binding(user_id)
+        job_ids: Set[str] = set()
+        if binding:
+            job_id = binding.countdown_job_ids.get(name)
+            if job_id:
+                job_ids.add(str(job_id))
+        job_ids |= await self._collect_countdown_job_ids(user_id, name)
+
+        for job_id in job_ids:
+            try:
+                await self._context.cron_manager.delete_job(job_id)
+            except Exception as e:
+                logger.debug(f"[coursebell] delete countdown cron {job_id}: {e}")
+
+        latest = self._storage.get_binding(user_id)
+        if latest and name in latest.countdown_job_ids:
+            ids = dict(latest.countdown_job_ids)
+            ids.pop(name, None)
+            self._storage.update_binding(user_id, countdown_job_ids=ids)
+
+    async def _collect_countdown_job_ids(self, user_id: str, name: str = "") -> Set[str]:
+        """从 cron 管理器中找出该用户的倒计时任务 id。"""
+        job_ids: Set[str] = set()
+        try:
+            jobs = await self._context.cron_manager.list_jobs("basic")
+        except Exception as e:
+            logger.debug(f"[coursebell] list cron jobs failed: {e}")
+            return job_ids
+        for job in jobs:
+            payload = getattr(job, "payload", None) or {}
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    payload = {}
+            if not isinstance(payload, dict):
+                continue
+            if payload.get("kind") != "countdown":
+                continue
+            if str(payload.get("user_id", "")) != user_id:
+                continue
+            if name and str(payload.get("countdown", "")) != name:
+                continue
+            job_id = getattr(job, "job_id", "")
+            if job_id:
+                job_ids.add(str(job_id))
+        return job_ids
+
+    async def _countdown_push_handler(self, **payload) -> None:
+        """cron 触发的倒计时通知。"""
+        user_id = payload.get("user_id")
+        name = str(payload.get("countdown", ""))
+        if not user_id or not name:
+            return
+        binding = self._storage.get_binding(user_id)
+        if not binding:
+            return
+        cd = binding.get_countdown(name)
+        if cd is None or cd.mode == "off":
+            return
+
+        today = datetime.now(SHANGHAI_TZ).date()
+        days_left = cd.days_left(today)
+        if days_left > 0:
+            text = f"⏳ {cd.name}倒计时：还有 {days_left} 天\n目标日期：{cd.date}"
+        elif days_left == 0:
+            text = f"🎯 {cd.name}就是今天！\n目标日期：{cd.date}"
+        else:
+            text = f"⏳ {cd.name}已过去 {-days_left} 天（目标日期 {cd.date}）"
+        try:
+            session = MessageSession.from_str(binding.unified_msg_origin)
+            await self._context.send_message(session, MessageChain().message(text))
+        except Exception as e:
+            logger.error(f"[coursebell] countdown push failed for {user_id}: {e}")
 
     # ------------------------------------------------------------------
     # 课前提醒循环
@@ -894,6 +1346,7 @@ class CourseBellPlugin(Star):
                     now=now,
                     events=events,
                     advance_minutes=binding.reminder_advance_minutes,
+                    date_map=binding.date_map,
                 )
                 if not hits:
                     continue
@@ -970,9 +1423,11 @@ def _format_week_text(title: str, start: date, days: list, subtitle: str = "") -
         lines.insert(1, subtitle)
     for day in days:
         mark = "（今天）" if day["is_today"] else ""
-        lines.append(f"—— {day['label']}{mark} {day['date_str']}")
+        note = day.get("swap_note") or ""
+        note_text = f"  [{note}]" if note else ""
+        lines.append(f"—— {day['label']}{mark} {day['date_str']}{note_text}")
         if not day["courses"]:
-            lines.append("    无课")
+            lines.append("    放假" if note == "放假" else "    无课")
         else:
             for c in day["courses"]:
                 lines.append(
@@ -1006,6 +1461,7 @@ def _reminder_time_from_key(key: str):
     if dt.tzinfo is None:
         return dt.replace(tzinfo=SHANGHAI_TZ)
     return dt.astimezone(SHANGHAI_TZ)
+
 
 
 async def _try_get_file_info(event: AstrMessageEvent):

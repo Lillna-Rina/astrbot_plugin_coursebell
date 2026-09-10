@@ -63,6 +63,12 @@ DAY_TMPL = r"""<!doctype html>
     text-align: center; color: #a9b4c8; font-size: 12px; font-weight: 600;
     margin-top: 14px;
   }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 7px; }
+  .tag {
+    font-size: 11px; font-weight: 800; padding: 3px 10px; border-radius: 999px;
+  }
+  .tag.swap { background: #fff1e0; color: #d98324; }
+  .tag.count { background: #e9f7ef; color: #2f9e5f; }
 </style>
 </head>
 <body>
@@ -72,11 +78,17 @@ DAY_TMPL = r"""<!doctype html>
         <div class="date">{{ date_str }}</div>
         <h1>📅 {{ title }}</h1>
         <div class="sub">{{ subtitle }}</div>
+        {% if swap_note or countdown %}
+        <div class="tags">
+          {% if swap_note %}<span class="tag swap">🔄 {{ swap_note }}</span>{% endif %}
+          {% if countdown %}<span class="tag count">{{ countdown }}</span>{% endif %}
+        </div>
+        {% endif %}
       </div>
       {% if courses|length == 0 %}
         <div class="empty">
           <div class="big">🎉</div>
-          <p>今天没有课程，享受生活吧～</p>
+          <p>{{ '今天放假，好好休息～' if swap_note else '今天没有课程，享受生活吧～' }}</p>
         </div>
       {% else %}
         <div class="courses">
@@ -203,6 +215,10 @@ WEEK_TMPL = r"""<!doctype html>
     overflow: hidden;
   }
   .none { color: #c3cbda; font-size: 11px; font-weight: 700; text-align: center; padding: 6px 0; }
+  .swap-note {
+    font-size: 9px; font-weight: 800; color: #d98324; background: #fff5e8;
+    border-radius: 5px; padding: 2px 5px; margin-bottom: 3px; text-align: center;
+  }
 </style>
 </head>
 <body>
@@ -220,8 +236,11 @@ WEEK_TMPL = r"""<!doctype html>
             <span class="day-date">{{ day.date_str }}</span>
           </div>
           <div class="day-body">
+            {% if day.swap_note %}
+              <div class="swap-note">{{ '🚫 放假' if day.swap_note == '放假' else '🔄 调休' }}</div>
+            {% endif %}
             {% if day.courses|length == 0 %}
-              <div class="none">无课</div>
+              <div class="none">{{ '放假' if day.swap_note else '无课' }}</div>
             {% else %}
               {% for c in day.courses %}
               <div class="row">
