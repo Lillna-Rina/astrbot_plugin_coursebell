@@ -32,6 +32,14 @@ from astrbot.core.platform.message_session import MessageSession
 from astrbot.core.utils.io import download_file
 from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
+try:
+    # GreedyStr：指令参数注解，表示接收该参数后的所有剩余文本（按空格合并）。
+    # 注意必须「只写注解、不带默认值」，否则框架只会给该参数传入第一个词。
+    from astrbot.core.star.filter.command import GreedyStr
+except ImportError:  # 本地测试环境没有 astrbot 包时的降级
+    class GreedyStr(str):
+        """与 AstrBot 框架行为一致的降级实现。"""
+
 from .command_parsers import (
     MODE_TEXT,
     parse_countdown_args as _parse_countdown_args,
@@ -679,7 +687,7 @@ class CourseBellPlugin(Star):
     # 日期倒计时（考研倒计时等）
     # ------------------------------------------------------------------
     @filter.command("设置倒计时", alias={"添加倒计时", "countdown"})
-    async def set_countdown(self, event: AstrMessageEvent, args: str = ""):
+    async def set_countdown(self, event: AstrMessageEvent, args: GreedyStr):
         """添加/更新日期倒计时。
 
         用法：/设置倒计时 <名称> <日期> [每日|每周|关闭] [HH:MM]
@@ -759,7 +767,7 @@ class CourseBellPlugin(Star):
         yield event.plain_result("倒计时：\n" + "\n".join(lines))
 
     @filter.command("删除倒计时", alias={"移除倒计时", "delcountdown"})
-    async def delete_countdown(self, event: AstrMessageEvent, args: str = ""):
+    async def delete_countdown(self, event: AstrMessageEvent, args: GreedyStr):
         user_id = str(event.get_sender_id())
         binding = self._resolve_binding(user_id, event)
         if not binding:
@@ -795,7 +803,7 @@ class CourseBellPlugin(Star):
     # 调休映射
     # ------------------------------------------------------------------
     @filter.command("设置调休", alias={"调休", "swapday"})
-    async def set_date_map(self, event: AstrMessageEvent, args: str = ""):
+    async def set_date_map(self, event: AstrMessageEvent, args: GreedyStr):
         """设置调休映射。
 
         用法：/设置调休 <日期>=<按哪天的课表> [更多...]
@@ -867,7 +875,7 @@ class CourseBellPlugin(Star):
         yield event.plain_result("当前调休规则：\n" + "\n".join(lines))
 
     @filter.command("删除调休", alias={"取消调休", "delswap"})
-    async def delete_date_map(self, event: AstrMessageEvent, args: str = ""):
+    async def delete_date_map(self, event: AstrMessageEvent, args: GreedyStr):
         user_id = str(event.get_sender_id())
         binding = self._resolve_binding(user_id, event)
         if not binding:
