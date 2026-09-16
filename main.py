@@ -63,6 +63,7 @@ from .storage import CourseStorage, pick_ics_file
 
 PLUGIN_NAME = "astrbot_plugin_coursebell"
 PLUGIN_DISPLAY_NAME = "课铃"
+PLUGIN_VERSION = "1.6.2"  # 插件版本号（/课表帮助 中显示，便于确认加载版本）
 WEEK_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
 
 # 会话等待超时（秒）
@@ -527,7 +528,7 @@ class CourseBellPlugin(Star):
     @filter.command("课表帮助", alias={"课程帮助", "help"})
     async def help(self, event: AstrMessageEvent):
         yield event.plain_result(
-            "🔔 课铃 · 课程提醒使用说明\n"
+            f"🔔 课铃 · 课程提醒使用说明 (v{PLUGIN_VERSION})\n"
             "──────────────\n"
             "📁 课表文件放在本地文件夹（插件配置 ics_dir），插件直接读取\n"
             "📥 /绑定课表 [文件名]   选择文件绑定，也可直接发送 .ics 文件\n"
@@ -700,6 +701,10 @@ class CourseBellPlugin(Star):
             return
 
         raw = str(args or "").strip()
+        logger.info(
+            f"[coursebell] set_countdown (plugin v{PLUGIN_VERSION}): "
+            f"type(args)={type(args).__name__}, repr(args)={args!r}, raw={raw!r}"
+        )
         if not raw:
             yield event.plain_result(
                 "请发送倒计时信息，格式：\n"
@@ -713,10 +718,15 @@ class CourseBellPlugin(Star):
             return
 
         parsed = _parse_countdown_args(raw)
+        logger.info(f"[coursebell] set_countdown: parsed={parsed!r}")
         if parsed is None:
             yield event.plain_result(
                 "格式不正确。请使用：/设置倒计时 <名称> <日期> [每日|每周|关闭] [HH:MM]\n"
-                "示例：/设置倒计时 考研 2026-12-26 每日 08:00"
+                "示例：/设置倒计时 考研 2026-12-26 每日 08:00\n\n"
+                f"你输入的内容：「{raw}」\n"
+                f"【诊断】收到的参数类型: {type(args).__name__}, 长度: {len(raw)} 字符\n"
+                "请检查日期格式是否正确（如 2026-12-26 或 12-26）\n"
+                "若仍报错，请查看 AstrBot 日志中 [coursebell] set_countdown 开头的行并反馈"
             )
             return
         name, date_str, mode, push_time = parsed
