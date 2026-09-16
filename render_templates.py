@@ -12,9 +12,8 @@ DAY_TMPL = r"""<!doctype html>
 <meta charset="utf-8"/>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html { width: fit-content; background: #eef2f9; }
-  body {
-    width: {{ page_width | default(420) }}px;
+  html, body {
+    margin: 0; padding: 0;
     background: #eef2f9;
     font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   }
@@ -116,33 +115,74 @@ DAY_TMPL = r"""<!doctype html>
       var doc = document.documentElement;
       var body = document.body;
       var minW = {{ page_width | default(420) }};
-      var stepW = 60;
-      var maxW = minW + stepW * 3;
-      var W = minW;
-      var H_target = W * 4 / 3;
-      stage.style.width = W + 'px';
-      stage.style.height = H_target + 'px';
-      body.style.width = W + 'px';
-      doc.style.width = W + 'px';
+      // 检测实际渲染视口（远程 t2i 服务可能用任意 viewport 尺寸）
+      var viewportW = window.innerWidth || doc.clientWidth || minW;
+      var viewportH = window.innerHeight || doc.clientHeight || 600;
+      // 画布宽度必须 >= 视口宽度（否则 full_page 截图按视口宽度），
+      // 且对应高度 >= 视口高度（否则截图按视口高度），保证输出严格 3:4
+      var W = Math.max(minW, viewportW, Math.ceil(viewportH * 3 / 4));
+      W = Math.ceil(W);
+      var H_target = Math.round(W * 4 / 3);
 
-      var h = content.scrollHeight;
+      function applySize(w, h) {
+        stage.style.width = w + 'px';
+        stage.style.height = h + 'px';
+        body.style.width = w + 'px';
+        body.style.height = h + 'px';
+        body.style.overflow = 'hidden';
+        doc.style.width = w + 'px';
+        doc.style.height = h + 'px';
+        doc.style.overflow = 'hidden';
+      }
+      applySize(W, H_target);
+
+      // 测量实际内容的自然高度（移除 flex 撑满）
+      var flexEl = content.querySelector('.courses') || content.querySelector('.grid');
+      var origMinH = content.style.minHeight;
+      var origFlex = flexEl ? flexEl.style.flex : null;
+      content.style.minHeight = 'auto';
+      if (flexEl) flexEl.style.flex = 'none';
+      var naturalH = content.scrollHeight;
+      content.style.minHeight = origMinH;
+      if (flexEl) flexEl.style.flex = origFlex;
+      console.log('[Scale] naturalH=' + naturalH + ' H_target=' + H_target);
+
+      // 内容过多时优先增大宽度（最多到当前宽度的 2 倍），再缩放内容
+      var h = naturalH;
       if (h > H_target) {
         var needW = Math.ceil(h * 3 / 4);
-        W = Math.min(Math.max(needW, minW + stepW), maxW);
-        W = Math.ceil(W / stepW) * stepW;
-        H_target = W * 4 / 3;
-        stage.style.width = W + 'px';
-        stage.style.height = H_target + 'px';
-        body.style.width = W + 'px';
-        doc.style.width = W + 'px';
+        var W2 = Math.min(Math.max(needW, W + 60), W * 2);
+        W2 = Math.ceil(W2 / 60) * 60;
+        var H2 = Math.round(W2 * 4 / 3);
+        applySize(W2, H2);
+        W = W2; H_target = H2;
+        // 重新测量（宽度变化可能改变换行）
+        content.style.minHeight = 'auto';
+        if (flexEl) flexEl.style.flex = 'none';
         h = content.scrollHeight;
+        content.style.minHeight = origMinH;
+        if (flexEl) flexEl.style.flex = origFlex;
       }
 
-      if (h > H_target) {
-        var s = H_target / h;
+      // 用自然高度判断：内容少则放大填充画布，内容多则缩小
+      var targetScale = H_target / naturalH;
+      console.log('[Scale] finalH=' + h + ' H_target=' + H_target + ' targetScale=' + targetScale.toFixed(2));
+      if (h > H_target * 0.98) {
+        // 增宽后仍装不下，需要缩小
+        var shrinkScale = H_target / h;
+        console.log('[Scale] shrink scale=' + shrinkScale.toFixed(2));
+        content.style.transform = 'scale(' + shrinkScale + ')';
+        content.style.transformOrigin = 'top center';
+        content.style.width = (100 / shrinkScale) + '%';
+      } else if (targetScale > 1.1) {
+        // 内容少，放大填充（最多 2.2 倍）
+        var s = Math.min(targetScale * 0.97, 2.2);
+        console.log('[Scale] enlarge scale=' + s.toFixed(2));
         content.style.transform = 'scale(' + s + ')';
-        content.style.transformOrigin = 'top left';
-        content.style.marginLeft = ((W - W * s) / 2) + 'px';
+        content.style.transformOrigin = 'top center';
+        content.style.width = (100 / s) + '%';
+      } else {
+        console.log('[Scale] no scale (fit)');
       }
     })();
   </script>
@@ -156,9 +196,8 @@ WEEK_TMPL = r"""<!doctype html>
 <meta charset="utf-8"/>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  html { width: fit-content; background: #eef2f9; }
-  body {
-    width: {{ page_width | default(420) }}px;
+  html, body {
+    margin: 0; padding: 0;
     background: #eef2f9;
     font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   }
@@ -262,33 +301,74 @@ WEEK_TMPL = r"""<!doctype html>
       var doc = document.documentElement;
       var body = document.body;
       var minW = {{ page_width | default(420) }};
-      var stepW = 60;
-      var maxW = minW + stepW * 3;
-      var W = minW;
-      var H_target = W * 4 / 3;
-      stage.style.width = W + 'px';
-      stage.style.height = H_target + 'px';
-      body.style.width = W + 'px';
-      doc.style.width = W + 'px';
+      // 检测实际渲染视口（远程 t2i 服务可能用任意 viewport 尺寸）
+      var viewportW = window.innerWidth || doc.clientWidth || minW;
+      var viewportH = window.innerHeight || doc.clientHeight || 600;
+      // 画布宽度必须 >= 视口宽度（否则 full_page 截图按视口宽度），
+      // 且对应高度 >= 视口高度（否则截图按视口高度），保证输出严格 3:4
+      var W = Math.max(minW, viewportW, Math.ceil(viewportH * 3 / 4));
+      W = Math.ceil(W);
+      var H_target = Math.round(W * 4 / 3);
 
-      var h = content.scrollHeight;
+      function applySize(w, h) {
+        stage.style.width = w + 'px';
+        stage.style.height = h + 'px';
+        body.style.width = w + 'px';
+        body.style.height = h + 'px';
+        body.style.overflow = 'hidden';
+        doc.style.width = w + 'px';
+        doc.style.height = h + 'px';
+        doc.style.overflow = 'hidden';
+      }
+      applySize(W, H_target);
+
+      // 测量实际内容的自然高度（移除 flex 撑满）
+      var flexEl = content.querySelector('.courses') || content.querySelector('.grid');
+      var origMinH = content.style.minHeight;
+      var origFlex = flexEl ? flexEl.style.flex : null;
+      content.style.minHeight = 'auto';
+      if (flexEl) flexEl.style.flex = 'none';
+      var naturalH = content.scrollHeight;
+      content.style.minHeight = origMinH;
+      if (flexEl) flexEl.style.flex = origFlex;
+      console.log('[Scale] naturalH=' + naturalH + ' H_target=' + H_target);
+
+      // 内容过多时优先增大宽度（最多到当前宽度的 2 倍），再缩放内容
+      var h = naturalH;
       if (h > H_target) {
         var needW = Math.ceil(h * 3 / 4);
-        W = Math.min(Math.max(needW, minW + stepW), maxW);
-        W = Math.ceil(W / stepW) * stepW;
-        H_target = W * 4 / 3;
-        stage.style.width = W + 'px';
-        stage.style.height = H_target + 'px';
-        body.style.width = W + 'px';
-        doc.style.width = W + 'px';
+        var W2 = Math.min(Math.max(needW, W + 60), W * 2);
+        W2 = Math.ceil(W2 / 60) * 60;
+        var H2 = Math.round(W2 * 4 / 3);
+        applySize(W2, H2);
+        W = W2; H_target = H2;
+        // 重新测量（宽度变化可能改变换行）
+        content.style.minHeight = 'auto';
+        if (flexEl) flexEl.style.flex = 'none';
         h = content.scrollHeight;
+        content.style.minHeight = origMinH;
+        if (flexEl) flexEl.style.flex = origFlex;
       }
 
-      if (h > H_target) {
-        var s = H_target / h;
+      // 用自然高度判断：内容少则放大填充画布，内容多则缩小
+      var targetScale = H_target / naturalH;
+      console.log('[Scale] finalH=' + h + ' H_target=' + H_target + ' targetScale=' + targetScale.toFixed(2));
+      if (h > H_target * 0.98) {
+        // 增宽后仍装不下，需要缩小
+        var shrinkScale = H_target / h;
+        console.log('[Scale] shrink scale=' + shrinkScale.toFixed(2));
+        content.style.transform = 'scale(' + shrinkScale + ')';
+        content.style.transformOrigin = 'top center';
+        content.style.width = (100 / shrinkScale) + '%';
+      } else if (targetScale > 1.1) {
+        // 内容少，放大填充（最多 2.2 倍）
+        var s = Math.min(targetScale * 0.97, 2.2);
+        console.log('[Scale] enlarge scale=' + s.toFixed(2));
         content.style.transform = 'scale(' + s + ')';
-        content.style.transformOrigin = 'top left';
-        content.style.marginLeft = ((W - W * s) / 2) + 'px';
+        content.style.transformOrigin = 'top center';
+        content.style.width = (100 / s) + '%';
+      } else {
+        console.log('[Scale] no scale (fit)');
       }
     })();
   </script>
