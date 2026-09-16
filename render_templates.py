@@ -167,20 +167,27 @@ DAY_TMPL = r"""<!doctype html>
       // 用自然高度判断：内容少则放大填充画布，内容多则缩小
       var targetScale = H_target / naturalH;
       console.log('[Scale] finalH=' + h + ' H_target=' + H_target + ' targetScale=' + targetScale.toFixed(2));
-      if (h > H_target * 0.98) {
-        // 增宽后仍装不下，需要缩小
-        var shrinkScale = H_target / h;
-        console.log('[Scale] shrink scale=' + shrinkScale.toFixed(2));
-        content.style.transform = 'scale(' + shrinkScale + ')';
-        content.style.transformOrigin = 'top center';
-        content.style.width = (100 / shrinkScale) + '%';
-      } else if (targetScale > 1.1) {
-        // 内容少，放大填充（最多 2.2 倍）
-        var s = Math.min(targetScale * 0.97, 2.2);
-        console.log('[Scale] enlarge scale=' + s.toFixed(2));
+
+      // 统一缩放：以左上角为原点，布局宽度 = 画布宽/scale，缩放后正好铺满画布宽度。
+      // 缩放前必须移除 flex 撑满（min-height/flex），否则内容高度被撑成画布高，无法正确缩放。
+      var isEnlarge = !(h > H_target * 0.98) && targetScale > 1.1;
+      var sDesired = isEnlarge ? Math.min(targetScale * 0.97, 2.2) : null;
+      if (h > H_target * 0.98 || isEnlarge) {
+        content.style.minHeight = 'auto';
+        if (flexEl) flexEl.style.flex = 'none';
+        var s = isEnlarge ? sDesired : (H_target / h);
+        for (var iter = 0; iter < 4; iter++) {
+          content.style.transformOrigin = 'top left';
+          content.style.transform = 'scale(' + s + ')';
+          content.style.width = (100 / s) + '%';
+          var layoutH = content.scrollHeight;  // 自然布局高度（不受 transform 影响）
+          var sNext = isEnlarge ? Math.min(H_target / layoutH, sDesired) : (H_target / layoutH);
+          if (Math.abs(sNext - s) < 0.005) { s = sNext; break; }
+          s = sNext;
+        }
         content.style.transform = 'scale(' + s + ')';
-        content.style.transformOrigin = 'top center';
         content.style.width = (100 / s) + '%';
+        console.log('[Scale] applied scale=' + s.toFixed(2) + (isEnlarge ? ' (enlarge)' : ' (shrink)'));
       } else {
         console.log('[Scale] no scale (fit)');
       }
@@ -353,20 +360,27 @@ WEEK_TMPL = r"""<!doctype html>
       // 用自然高度判断：内容少则放大填充画布，内容多则缩小
       var targetScale = H_target / naturalH;
       console.log('[Scale] finalH=' + h + ' H_target=' + H_target + ' targetScale=' + targetScale.toFixed(2));
-      if (h > H_target * 0.98) {
-        // 增宽后仍装不下，需要缩小
-        var shrinkScale = H_target / h;
-        console.log('[Scale] shrink scale=' + shrinkScale.toFixed(2));
-        content.style.transform = 'scale(' + shrinkScale + ')';
-        content.style.transformOrigin = 'top center';
-        content.style.width = (100 / shrinkScale) + '%';
-      } else if (targetScale > 1.1) {
-        // 内容少，放大填充（最多 2.2 倍）
-        var s = Math.min(targetScale * 0.97, 2.2);
-        console.log('[Scale] enlarge scale=' + s.toFixed(2));
+
+      // 统一缩放：以左上角为原点，布局宽度 = 画布宽/scale，缩放后正好铺满画布宽度。
+      // 缩放前必须移除 flex 撑满（min-height/flex），否则内容高度被撑成画布高，无法正确缩放。
+      var isEnlarge = !(h > H_target * 0.98) && targetScale > 1.1;
+      var sDesired = isEnlarge ? Math.min(targetScale * 0.97, 2.2) : null;
+      if (h > H_target * 0.98 || isEnlarge) {
+        content.style.minHeight = 'auto';
+        if (flexEl) flexEl.style.flex = 'none';
+        var s = isEnlarge ? sDesired : (H_target / h);
+        for (var iter = 0; iter < 4; iter++) {
+          content.style.transformOrigin = 'top left';
+          content.style.transform = 'scale(' + s + ')';
+          content.style.width = (100 / s) + '%';
+          var layoutH = content.scrollHeight;  // 自然布局高度（不受 transform 影响）
+          var sNext = isEnlarge ? Math.min(H_target / layoutH, sDesired) : (H_target / layoutH);
+          if (Math.abs(sNext - s) < 0.005) { s = sNext; break; }
+          s = sNext;
+        }
         content.style.transform = 'scale(' + s + ')';
-        content.style.transformOrigin = 'top center';
         content.style.width = (100 / s) + '%';
+        console.log('[Scale] applied scale=' + s.toFixed(2) + (isEnlarge ? ' (enlarge)' : ' (shrink)'));
       } else {
         console.log('[Scale] no scale (fit)');
       }
